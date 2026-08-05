@@ -1,10 +1,18 @@
-/**
- * Calcula a Média Móvel Exponencial.
- */
-export function calculateEMA(values: number[], period: number): number {
+import type { Candle } from '@/types';
+
+function validatePeriod(period: number, indicator: string): void {
   if (!Number.isInteger(period) || period <= 0) {
-    throw new Error('O período da EMA deve ser um número inteiro positivo.');
+    throw new Error(
+      `O período do ${indicator} deve ser um número inteiro positivo.`,
+    );
   }
+}
+
+export function calculateEMA(
+  values: number[],
+  period: number,
+): number {
+  validatePeriod(period, 'EMA');
 
   if (values.length < period) {
     throw new Error(
@@ -12,10 +20,10 @@ export function calculateEMA(values: number[], period: number): number {
     );
   }
 
-  const initialValues = values.slice(0, period);
-
   let ema =
-    initialValues.reduce((total, value) => total + value, 0) / period;
+    values
+      .slice(0, period)
+      .reduce((total, value) => total + value, 0) / period;
 
   const multiplier = 2 / (period + 1);
 
@@ -26,28 +34,24 @@ export function calculateEMA(values: number[], period: number): number {
   return ema;
 }
 
-/**
- * Calcula uma série completa de EMA.
- */
 export function calculateEMASeries(
   values: number[],
   period: number,
 ): number[] {
+  validatePeriod(period, 'EMA');
+
   if (values.length < period) {
     throw new Error(
       `São necessários pelo menos ${period} valores para calcular a série EMA.`,
     );
   }
 
-  const result: number[] = [];
-
   let ema =
     values
       .slice(0, period)
       .reduce((total, value) => total + value, 0) / period;
 
-  result.push(ema);
-
+  const result = [ema];
   const multiplier = 2 / (period + 1);
 
   for (let index = period; index < values.length; index += 1) {
@@ -58,16 +62,11 @@ export function calculateEMASeries(
   return result;
 }
 
-/**
- * Calcula o RSI pelo método suavizado de Wilder.
- */
 export function calculateRSI(
   values: number[],
   period = 14,
 ): number {
-  if (!Number.isInteger(period) || period <= 0) {
-    throw new Error('O período do RSI deve ser um número inteiro positivo.');
-  }
+  validatePeriod(period, 'RSI');
 
   if (values.length <= period) {
     throw new Error(
@@ -107,6 +106,10 @@ export function calculateRSI(
     return 100;
   }
 
+  if (averageGain === 0) {
+    return 0;
+  }
+
   const relativeStrength = averageGain / averageLoss;
 
   return 100 - 100 / (1 + relativeStrength);
@@ -118,9 +121,6 @@ export interface MacdResult {
   histogram: number;
 }
 
-/**
- * Calcula MACD 12, 26 e linha de sinal 9.
- */
 export function calculateMACD(
   values: number[],
   fastPeriod = 12,
@@ -129,13 +129,14 @@ export function calculateMACD(
 ): MacdResult {
   if (values.length < slowPeriod + signalPeriod) {
     throw new Error(
-      `São necessários pelo menos ${slowPeriod + signalPeriod} valores para calcular o MACD.`,
+      `São necessários pelo menos ${
+        slowPeriod + signalPeriod
+      } valores para calcular o MACD.`,
     );
   }
 
   const fastSeries = calculateEMASeries(values, fastPeriod);
   const slowSeries = calculateEMASeries(values, slowPeriod);
-
   const offset = slowPeriod - fastPeriod;
 
   const macdSeries = slowSeries.map(
@@ -150,11 +151,65 @@ export function calculateMACD(
 
   const macd = macdSeries[macdSeries.length - 1];
   const signal = signalSeries[signalSeries.length - 1];
-  const histogram = macd - signal;
 
   return {
     macd,
     signal,
-    histogram,
+    histogram: macd - signal,
   };
+}
+
+export function calculateATR(
+  candles: Candle[],
+  period = 14,
+): number {
+  validatePeriod(period, 'ATR');
+
+  if (candles.length <= period) {
+    throw new Error(
+      `São necessários pelo menos ${period + 1} candles para calcular o ATR.`,
+    );
+  }
+
+  const trueRanges: number[] = [];
+
+  for (let index = 1; index < candles.length; index += 1) {
+    const current = candles[index];
+    const previousClose = candles[index - 1].close;
+
+    const highLow = current.high - current.low;
+    const highPrevious = Math.abs(current.high - previousClose);
+    const lowPrevious = Math.abs(current.low - previousClose);
+
+    trueRanges.push(
+      Math.max(highLow, highPrevious, lowPrevious),
+    );
+  }
+
+  let atr =
+    trueRanges
+      .slice(0, period)
+      .reduce((total, value) => total + value, 0) / period;
+
+  for (
+    let index = period;
+    index < trueRanges.length;
+    index += 1
+  ) {
+    atr =
+      (atr * (period - 1) + trueRanges[index]) / period;
+  }
+
+  return atr;
+}
+
+export function calculateAverage(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  return (
+    values.reduce((total, value) => total + value, 0) /
+    values.length
+  );
 }

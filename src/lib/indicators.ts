@@ -19,6 +19,8 @@ import {
   calculateEMA,
   calculateRSI,
   calculateMACD,
+  calculateATR,
+  calculateAverage,
 } from '@/lib/technicalIndicators';
 
 interface IndicatorMeta {
@@ -57,13 +59,13 @@ export const INDICATOR_META: IndicatorMeta[] = [
     key: 'volume',
     label: 'Volume',
     abbr: 'VOL',
-    description: 'Pressão de compradores vs. vendedores',
+    description: 'Volume atual comparado à média recente',
   },
   {
     key: 'atr',
     label: 'ATR',
     abbr: 'ATR',
-    description: 'Volatilidade média — tamanho do movimento',
+    description: 'Amplitude verdadeira média — volatilidade',
   },
 ];
 
@@ -80,37 +82,47 @@ export const INDICATOR_LABELS: Record<IndicatorKey, string> =
 const STRENGTH_BUY = 62;
 const STRENGTH_SELL = 38;
 
-const WEIGHTS: Record<IndicatorKey, number> = {
+const DIRECTIONAL_WEIGHTS: Record<IndicatorKey, number> = {
   ema9: 1.2,
-  ema21: 1,
+  ema21: 1.1,
   rsi: 1,
   macd: 1.3,
   volume: 0.9,
-  atr: 0.6,
+  atr: 0,
 };
 
-const TOTAL_WEIGHT = Object.values(WEIGHTS).reduce(
-  (total, weight) => total + weight,
-  0,
-);
+const TOTAL_DIRECTIONAL_WEIGHT = Object.values(
+  DIRECTIONAL_WEIGHTS,
+).reduce((total, weight) => total + weight, 0);
 
 type Rng = () => number;
+
+function clamp(
+  value: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return Math.max(minimum, Math.min(maximum, value));
+}
 
 export function signalFromStrength(strength: number): Signal {
   if (strength >= STRENGTH_BUY) return 'BUY';
   if (strength <= STRENGTH_SELL) return 'SELL';
+
   return 'WAIT';
 }
 
 export function signalLabel(signal: Signal): string {
   if (signal === 'BUY') return 'Compra';
   if (signal === 'SELL') return 'Venda';
+
   return 'Neutro';
 }
 
 export function signalShort(signal: Signal): string {
   if (signal === 'BUY') return 'COMPRA';
   if (signal === 'SELL') return 'VENDA';
+
   return 'AGUARDAR';
 }
 
@@ -119,9 +131,12 @@ function strengthFromDifference(
   sensitivity = 0.15,
 ): number {
   const normalized = differencePercent / sensitivity;
-  const strength = 50 + normalized * 25;
 
-  return Math.max(5, Math.min(95, Math.round(strength)));
+  return clamp(
+    Math.round(50 + normalized * 25),
+    5,
+    95,
+  );
 }
 
 export function buildRealEmaIndicators(
@@ -130,7 +145,7 @@ export function buildRealEmaIndicators(
 ): IndicatorResult[] {
   if (candles.length < 21) {
     throw new Error(
-      'São necessários pelo menos 21 candles para calcular EMA 9 e EMA 21.',
+      'São necessários pelo menos 21 candles para calcular as EMAs.',
     );
   }
 
@@ -140,18 +155,18 @@ export function buildRealEmaIndicators(
   const ema9 = calculateEMA(closes, 9);
   const ema21 = calculateEMA(closes, 21);
 
-  const priceVsEma9Percent =
+  const priceVsEma9 =
     ((lastClose - ema9) / ema9) * 100;
 
-  const ema9VsEma21Percent =
+  const ema9VsEma21 =
     ((ema9 - ema21) / ema21) * 100;
 
   const ema9Strength = strengthFromDifference(
-    priceVsEma9Percent,
+    priceVsEma9,
   );
 
   const ema21Strength = strengthFromDifference(
-    ema9VsEma21Percent,
+    ema9VsEma21,
   );
 
   const formatter = new Intl.NumberFormat('pt-BR', {
@@ -182,7 +197,7 @@ export function buildRealEmaIndicators(
           ? 'EMA 9 acima da EMA 21 — estrutura altista'
           : ema9 < ema21
             ? 'EMA 9 abaixo da EMA 21 — estrutura baixista'
-            : 'EMA 9 e EMA 21 praticamente alinhadas',
+            : 'EMAs praticamente alinhadas',
     },
   ];
 }
@@ -190,42 +205,29 @@ export function buildRealEmaIndicators(
 export function buildRealRsiIndicator(
   candles: Candle[],
 ): IndicatorResult {
-  if (candles.length < 15) {
-    throw new Error(
-      'São necessários pelo menos 15 candles para calcular o RSI.',
-    );
-  }
-
   const closes = candles.map((candle) => candle.close);
   const rsi = calculateRSI(closes, 14);
 
-  let signal: Signal = 'WAIT';
   let strength = 50;
   let detail = 'RSI em zona neutra';
 
   if (rsi >= 70) {
-    signal = 'SELL';
-    strength = Math.max(5, Math.round(100 - rsi));
-    detail =
-      'RSI em sobrecompra — atenção para possível correção';
+    strength = clamp(Math.round(100 - rsi), 5, 38);
+    detail = 'RSI em sobrecompra — possível correção';
   } else if (rsi <= 30) {
-    signal = 'BUY';
-    strength = Math.min(95, Math.round(100 - rsi));
-    detail =
-      'RSI em sobrevenda — atenção para possível recuperação';
+    strength = clamp(Math.round(100 - rsi), 62, 95);
+    detail = 'RSI em sobrevenda — possível recuperação';
   } else if (rsi >= 55) {
-    signal = 'BUY';
-    strength = Math.min(95, Math.round(rsi));
-    detail = 'RSI acima de 55 — momentum comprador';
+    strength = clamp(Math.round(rsi), 62, 85);
+    detail = 'RSI confirma momentum comprador';
   } else if (rsi <= 45) {
-    signal = 'SELL';
-    strength = Math.max(5, Math.round(rsi));
-    detail = 'RSI abaixo de 45 — momentum vendedor';
+    strength = clamp(Math.round(rsi), 15, 38);
+    detail = 'RSI confirma momentum vendedor';
   }
 
   return {
     key: 'rsi',
-    signal,
+    signal: signalFromStrength(strength),
     value: rsi.toFixed(1),
     strength,
     detail,
@@ -236,56 +238,128 @@ export function buildRealMacdIndicator(
   candles: Candle[],
   decimals: number,
 ): IndicatorResult {
-  if (candles.length < 35) {
-    throw new Error(
-      'São necessários pelo menos 35 candles para calcular o MACD.',
-    );
-  }
-
   const closes = candles.map((candle) => candle.close);
 
   const {
     macd,
     signal: signalLine,
     histogram,
-  } = calculateMACD(closes, 12, 26, 9);
+  } = calculateMACD(closes);
 
-  const reference =
-    Math.abs(closes[closes.length - 1]) || 1;
+  const lastPrice = Math.abs(closes[closes.length - 1]) || 1;
 
   const histogramPercent =
-    (histogram / reference) * 100;
+    (histogram / lastPrice) * 100;
 
   const strength = strengthFromDifference(
     histogramPercent,
-    0.01,
+    0.02,
   );
-
-  const indicatorSignal = signalFromStrength(strength);
 
   const formatter = new Intl.NumberFormat('pt-BR', {
     minimumFractionDigits: decimals + 1,
     maximumFractionDigits: decimals + 1,
   });
 
-  let detail = 'MACD próximo da linha de sinal';
-
-  if (histogram > 0) {
-    detail =
-      'MACD acima da linha de sinal — momentum altista';
-  } else if (histogram < 0) {
-    detail =
-      'MACD abaixo da linha de sinal — momentum baixista';
-  }
-
   return {
     key: 'macd',
-    signal: indicatorSignal,
+    signal: signalFromStrength(strength),
     value: formatter.format(macd),
     strength,
     detail:
-      `${detail}. Sinal: ${formatter.format(signalLine)} · ` +
-      `Histograma: ${formatter.format(histogram)}`,
+      histogram > 0
+        ? `Momentum altista · Histograma ${formatter.format(histogram)}`
+        : histogram < 0
+          ? `Momentum baixista · Histograma ${formatter.format(histogram)}`
+          : `MACD neutro · Sinal ${formatter.format(signalLine)}`,
+  };
+}
+
+export function buildRealVolumeIndicator(
+  candles: Candle[],
+): IndicatorResult {
+  if (candles.length < 21) {
+    throw new Error(
+      'São necessários pelo menos 21 candles para calcular o volume.',
+    );
+  }
+
+  const lastCandle = candles[candles.length - 1];
+  const recentCandles = candles.slice(-21, -1);
+
+  const averageVolume = calculateAverage(
+    recentCandles.map((candle) => candle.volume),
+  );
+
+  const ratio =
+    averageVolume > 0
+      ? lastCandle.volume / averageVolume
+      : 1;
+
+  const priceChange =
+    lastCandle.close - lastCandle.open;
+
+  const direction =
+    priceChange > 0
+      ? 1
+      : priceChange < 0
+        ? -1
+        : 0;
+
+  const excessVolume = Math.max(0, ratio - 1);
+
+  const strength = clamp(
+    Math.round(50 + direction * excessVolume * 30),
+    5,
+    95,
+  );
+
+  let detail = 'Volume próximo da média recente';
+
+  if (ratio >= 1.2 && direction > 0) {
+    detail = 'Volume comprador acima da média';
+  } else if (ratio >= 1.2 && direction < 0) {
+    detail = 'Volume vendedor acima da média';
+  } else if (ratio < 0.8) {
+    detail = 'Volume abaixo da média — movimento com pouca confirmação';
+  }
+
+  return {
+    key: 'volume',
+    signal: signalFromStrength(strength),
+    value: `${ratio.toFixed(2)}x`,
+    strength,
+    detail,
+  };
+}
+
+export function buildRealAtrIndicator(
+  candles: Candle[],
+  decimals: number,
+): IndicatorResult {
+  const atr = calculateATR(candles, 14);
+  const lastPrice = candles[candles.length - 1].close;
+  const atrPercent = (atr / lastPrice) * 100;
+
+  const formatter = new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+
+  let detail = 'Volatilidade moderada';
+
+  if (atrPercent >= 0.2) {
+    detail = 'Volatilidade elevada — atenção ao tamanho do stop';
+  } else if (atrPercent <= 0.08) {
+    detail = 'Volatilidade baixa — mercado mais comprimido';
+  }
+
+  return {
+    key: 'atr',
+    signal: 'WAIT',
+    value: formatter.format(atr),
+    strength: 50,
+    detail,
   };
 }
 
@@ -297,133 +371,17 @@ export function buildIndicator(
   decimals: number,
 ): IndicatorResult {
   const strength = Math.round(8 + rng() * 86);
-  const signal = signalFromStrength(strength);
-  const bias = strength - 50;
-
-  let value = '';
-  let detail = '';
-
-  switch (key) {
-    case 'ema9': {
-      const difference =
-        (rng() - 0.5) * price * 0.0012;
-
-      const ema = price - difference;
-
-      value = ema.toLocaleString('pt-BR', {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      });
-
-      detail =
-        bias > 4
-          ? 'Preço acima da EMA 9'
-          : bias < -4
-            ? 'Preço abaixo da EMA 9'
-            : 'Preço próximo da EMA 9';
-
-      break;
-    }
-
-    case 'ema21': {
-      const difference =
-        (rng() - 0.5) * price * 0.0022;
-
-      const ema = price - difference;
-
-      value = ema.toLocaleString('pt-BR', {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      });
-
-      detail =
-        bias > 4
-          ? 'EMA 9 acima da EMA 21 — cruzamento altista'
-          : bias < -4
-            ? 'EMA 9 abaixo da EMA 21 — cruzamento baixista'
-            : 'Médias entrelaçadas';
-
-      break;
-    }
-
-    case 'rsi': {
-      const rsi = Math.round(18 + rng() * 66);
-
-      value = `${rsi}`;
-
-      detail =
-        rsi >= 70
-          ? 'Sobrecompra — possível reversão'
-          : rsi <= 30
-            ? 'Sobrevenda — possível reversão'
-            : 'Zona neutra';
-
-      break;
-    }
-
-    case 'macd': {
-      const macd =
-        (rng() - 0.45) * price * 0.0009;
-
-      value = macd.toLocaleString('pt-BR', {
-        minimumFractionDigits: decimals + 1,
-        maximumFractionDigits: decimals + 1,
-      });
-
-      detail =
-        bias > 4
-          ? 'Histograma positivo — momentum altista'
-          : bias < -4
-            ? 'Histograma negativo — momentum baixista'
-            : 'Histograma próximo de zero';
-
-      break;
-    }
-
-    case 'volume': {
-      const ratio = (0.6 + rng() * 1.5).toFixed(2);
-
-      value = `${ratio}x`;
-
-      detail =
-        bias > 4
-          ? 'Volume comprador dominante'
-          : bias < -4
-            ? 'Volume vendedor dominante'
-            : 'Volume equilibrado';
-
-      break;
-    }
-
-    case 'atr': {
-      const atr =
-        price * (0.0008 + rng() * 0.0022);
-
-      value = atr.toLocaleString('pt-BR', {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      });
-
-      const volatilityPercent = atr / price;
-
-      detail =
-        volatilityPercent > 0.002
-          ? 'Volatilidade elevada'
-          : volatilityPercent > 0.0011
-            ? 'Volatilidade moderada'
-            : 'Volatilidade baixa';
-
-      break;
-    }
-  }
 
   void asset;
 
   return {
     key,
-    signal,
-    value,
-    detail,
+    signal: signalFromStrength(strength),
+    value: price.toLocaleString('pt-BR', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }),
+    detail: 'Indicador temporariamente simulado',
     strength,
   };
 }
@@ -437,28 +395,21 @@ export function finalizeAnalysis(
 ): Omit<AnalysisResult, 'id' | 'createdAt'> {
   const info = ASSETS[asset];
 
-  let weighted = 0;
+  let weightedBias = 0;
 
   for (const indicator of indicators) {
-    weighted +=
+    weightedBias +=
       (indicator.strength - 50) *
-      WEIGHTS[indicator.key];
+      DIRECTIONAL_WEIGHTS[indicator.key];
   }
 
-  const bias = weighted / TOTAL_WEIGHT;
+  const bias =
+    weightedBias / TOTAL_DIRECTIONAL_WEIGHT;
 
-  const score = Math.max(
+  const score = clamp(
+    Math.round(50 + bias),
     0,
-    Math.min(100, Math.round(50 + bias)),
-  );
-
-  const confidence = Math.round(
-    Math.min(
-      100,
-      45 +
-        Math.abs(bias) * 1.1 +
-        (mulberryHash(score) % 12),
-    ),
+    100,
   );
 
   let finalSignal: Signal = 'WAIT';
@@ -469,10 +420,55 @@ export function finalizeAnalysis(
     finalSignal = 'SELL';
   }
 
+  const directionalIndicators = indicators.filter(
+    (indicator) => indicator.key !== 'atr',
+  );
+
+  const agreeingIndicators =
+    finalSignal === 'WAIT'
+      ? directionalIndicators.filter(
+          (indicator) => indicator.signal === 'WAIT',
+        ).length
+      : directionalIndicators.filter(
+          (indicator) => indicator.signal === finalSignal,
+        ).length;
+
+  const agreement =
+    directionalIndicators.length > 0
+      ? agreeingIndicators / directionalIndicators.length
+      : 0;
+
+  const atrIndicator = indicators.find(
+    (indicator) => indicator.key === 'atr',
+  );
+
+  const volatilityBonus = atrIndicator ? 5 : 0;
+
+  const confidence = clamp(
+    Math.round(
+      45 +
+        Math.abs(score - 50) * 0.8 +
+        agreement * 25 +
+        volatilityBonus,
+    ),
+    0,
+    100,
+  );
+
+  const ema9 = indicators.find(
+    (indicator) => indicator.key === 'ema9',
+  );
+
+  const ema21 = indicators.find(
+    (indicator) => indicator.key === 'ema21',
+  );
+
   const trend: AnalysisResult['trend'] =
-    score >= 58
+    ema9?.signal === 'BUY' &&
+    ema21?.signal === 'BUY'
       ? 'ALTA'
-      : score <= 42
+      : ema9?.signal === 'SELL' &&
+          ema21?.signal === 'SELL'
         ? 'BAIXA'
         : 'LATERAL';
 
@@ -486,8 +482,7 @@ export function finalizeAnalysis(
 
   const roundedStopDistance = Math.max(
     info.tick,
-    Math.round(stopDistance / info.tick) *
-      info.tick,
+    Math.round(stopDistance / info.tick) * info.tick,
   );
 
   const stop =
@@ -500,9 +495,18 @@ export function finalizeAnalysis(
       ? quote.price + roundedStopDistance * 2
       : quote.price - roundedStopDistance * 2;
 
-  const probability = Math.round(
-    50 + bias * 0.6,
-  );
+  const probability =
+    finalSignal === 'WAIT'
+      ? 50
+      : clamp(
+          Math.round(
+            50 +
+              Math.abs(score - 50) * 0.8 +
+              agreement * 15,
+          ),
+          50,
+          95,
+        );
 
   const aiScore = Math.round(
     score * 0.6 + confidence * 0.4,
@@ -532,27 +536,6 @@ export function finalizeAnalysis(
   };
 }
 
-function mulberryHash(value: number): number {
-  let result = Math.imul(
-    value ^ (value >>> 15),
-    1 | value,
-  );
-
-  result =
-    (
-      result +
-      Math.imul(
-        result ^ (result >>> 7),
-        61 | result,
-      )
-    ) ^ result;
-
-  return (
-    ((result ^ (result >>> 14)) >>> 0) %
-    100
-  );
-}
-
 export function scoreGrade(
   score: number,
 ): {
@@ -560,37 +543,22 @@ export function scoreGrade(
   tone: string;
 } {
   if (score >= 75) {
-    return {
-      label: 'Forte Compra',
-      tone: 'bull',
-    };
+    return { label: 'Forte Compra', tone: 'bull' };
   }
 
   if (score >= 62) {
-    return {
-      label: 'Compra',
-      tone: 'bull',
-    };
+    return { label: 'Compra', tone: 'bull' };
   }
 
   if (score >= 42) {
-    return {
-      label: 'Neutro',
-      tone: 'wait',
-    };
+    return { label: 'Neutro', tone: 'wait' };
   }
 
   if (score >= 25) {
-    return {
-      label: 'Venda',
-      tone: 'bear',
-    };
+    return { label: 'Venda', tone: 'bear' };
   }
 
-  return {
-    label: 'Forte Venda',
-    tone: 'bear',
-  };
+  return { label: 'Forte Venda', tone: 'bear' };
 }
 
 export const TIMEFRAME_OPTIONS = TIMEFRAMES;

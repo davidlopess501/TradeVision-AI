@@ -21,6 +21,8 @@ import {
   buildRealEmaIndicators,
   buildRealRsiIndicator,
   buildRealMacdIndicator,
+  buildRealVolumeIndicator,
+  buildRealAtrIndicator,
   finalizeAnalysis,
 } from '@/lib/indicators';
 
@@ -78,19 +80,14 @@ export class SimulatedMarketDataProvider
 
     const rng = mulberry32(
       hashStr(
-        `${asset}-quote-${Math.floor(
-          Date.now() / 60000,
-        )}`,
+        `${asset}-quote-${Math.floor(Date.now() / 60000)}`,
       ),
     );
 
     const drift =
-      (rng() - 0.5) *
-      info.basePrice *
-      0.004;
+      (rng() - 0.5) * info.basePrice * 0.004;
 
-    const price =
-      info.basePrice + drift;
+    const price = info.basePrice + drift;
 
     const open =
       price -
@@ -100,31 +97,22 @@ export class SimulatedMarketDataProvider
 
     const high =
       Math.max(price, open) +
-      rng() *
-        info.basePrice *
-        0.0014;
+      rng() * info.basePrice * 0.0014;
 
     const low =
       Math.min(price, open) -
-      rng() *
-        info.basePrice *
-        0.0014;
-
-    const changePct =
-      ((price - open) / open) * 100;
-
-    const spread =
-      info.tick *
-      (1 + Math.floor(rng() * 3));
+      rng() * info.basePrice * 0.0014;
 
     return {
       asset,
       price,
-      changePct,
+      changePct: ((price - open) / open) * 100,
       high,
       low,
       open,
-      spread,
+      spread:
+        info.tick *
+        (1 + Math.floor(rng() * 3)),
       updatedAt: Date.now(),
     };
   }
@@ -139,20 +127,15 @@ export class SimulatedMarketDataProvider
       if (!active) return;
 
       try {
-        callback(
-          await this.getQuote(asset),
-        );
+        callback(await this.getQuote(asset));
       } catch {
-        // Mantém a interface funcionando caso uma atualização falhe.
+        // Evita derrubar a interface.
       }
     };
 
     void update();
 
-    const interval = window.setInterval(
-      update,
-      4000,
-    );
+    const interval = window.setInterval(update, 4000);
 
     return () => {
       active = false;
@@ -169,28 +152,20 @@ export class SimulatedMarketDataProvider
 
     const timeframeMinutes =
       TIMEFRAMES.find(
-        (item) =>
-          item.value === timeframe,
+        (item) => item.value === timeframe,
       )?.minutes ?? 1;
 
     const rng = mulberry32(
-      hashStr(
-        `${asset}-${timeframe}-candles`,
-      ),
+      hashStr(`${asset}-${timeframe}-candles`),
     );
 
     const now = Date.now();
-
-    const candleDuration =
-      timeframeMinutes * 60000;
+    const candleDuration = timeframeMinutes * 60000;
 
     let price =
-      info.basePrice *
-      (0.995 + rng() * 0.01);
+      info.basePrice * (0.995 + rng() * 0.01);
 
-    const volatility =
-      info.basePrice * 0.0012;
-
+    const volatility = info.basePrice * 0.0012;
     const candles: Candle[] = [];
 
     for (
@@ -199,37 +174,23 @@ export class SimulatedMarketDataProvider
       index -= 1
     ) {
       const open = price;
-
-      const change =
-        (rng() - 0.48) *
-        volatility;
-
-      const close = Math.max(
-        info.tick,
-        open + change,
-      );
+      const change = (rng() - 0.48) * volatility;
+      const close = Math.max(info.tick, open + change);
 
       const high =
         Math.max(open, close) +
-        rng() *
-          volatility *
-          0.6;
+        rng() * volatility * 0.6;
 
       const low =
         Math.min(open, close) -
-        rng() *
-          volatility *
-          0.6;
+        rng() * volatility * 0.6;
 
       const volume = Math.round(
         500 + rng() * 4500,
       );
 
       candles.push({
-        time:
-          now -
-          index *
-            candleDuration,
+        time: now - index * candleDuration,
         open,
         high,
         low,
@@ -247,91 +208,76 @@ export class SimulatedMarketDataProvider
     asset: Asset,
     timeframe: Timeframe,
   ): Promise<IndicatorResult[]> {
-    const quote =
-      await this.getQuote(asset);
+    const quote = await this.getQuote(asset);
 
-    const candles =
-      await this.getCandles(
-        asset,
-        timeframe,
-        120,
-      );
-
-    const seed = hashStr(
-      `${asset}-${timeframe}-${Math.floor(
-        Date.now() / 30000,
-      )}`,
+    const candles = await this.getCandles(
+      asset,
+      timeframe,
+      120,
     );
 
-    const rng = mulberry32(seed);
+    const rng = mulberry32(
+      hashStr(
+        `${asset}-${timeframe}-${Math.floor(
+          Date.now() / 30000,
+        )}`,
+      ),
+    );
 
-    const realEmaIndicators =
-      buildRealEmaIndicators(
+    const realIndicators: IndicatorResult[] = [
+      ...buildRealEmaIndicators(
         candles,
         ASSETS[asset].decimals,
-      );
-
-    const realRsiIndicator =
-      buildRealRsiIndicator(candles);
-
-    const realMacdIndicator =
+      ),
+      buildRealRsiIndicator(candles),
       buildRealMacdIndicator(
         candles,
         ASSETS[asset].decimals,
+      ),
+      buildRealVolumeIndicator(candles),
+      buildRealAtrIndicator(
+        candles,
+        ASSETS[asset].decimals,
+      ),
+    ];
+
+    return INDICATOR_META.map((meta) => {
+      const realIndicator = realIndicators.find(
+        (indicator) => indicator.key === meta.key,
       );
 
-    const realIndicators: IndicatorResult[] =
-      [
-        ...realEmaIndicators,
-        realRsiIndicator,
-        realMacdIndicator,
-      ];
+      if (realIndicator) {
+        return realIndicator;
+      }
 
-    return INDICATOR_META.map(
-      (meta) => {
-        const realIndicator =
-          realIndicators.find(
-            (indicator) =>
-              indicator.key ===
-              meta.key,
-          );
-
-        if (realIndicator) {
-          return realIndicator;
-        }
-
-        return buildIndicator(
-          meta.key,
-          rng,
-          asset,
-          quote.price,
-          ASSETS[asset].decimals,
-        );
-      },
-    );
+      return buildIndicator(
+        meta.key,
+        rng,
+        asset,
+        quote.price,
+        ASSETS[asset].decimals,
+      );
+    });
   }
 
   async analyze(
     asset: Asset,
     timeframe: Timeframe,
   ): Promise<AnalysisResult> {
-    const quote =
-      await this.getQuote(asset);
+    const quote = await this.getQuote(asset);
 
-    const indicators =
-      await this.getIndicators(
-        asset,
-        timeframe,
-      );
+    const indicators = await this.getIndicators(
+      asset,
+      timeframe,
+    );
 
-    const analysis =
-      finalizeAnalysis(
-        asset,
-        timeframe,
-        indicators,
-        quote,
-        formatPrice,
-      );
+    const analysis = finalizeAnalysis(
+      asset,
+      timeframe,
+      indicators,
+      quote,
+      formatPrice,
+    );
 
     return {
       ...analysis,
