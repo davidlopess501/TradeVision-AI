@@ -48,6 +48,11 @@ import {
 } from '@/lib/orderBlocks';
 
 import {
+  analyzeFairValueGaps,
+  type FairValueGap,
+} from '@/lib/fairValueGaps';
+
+import {
   ArrowUpCircle,
   ArrowDownCircle,
   CircleDot,
@@ -175,6 +180,35 @@ function orderBlockLabel(
   return `${direction} · ${status} · ${block.strength}`;
 }
 
+function fairValueGapColor(
+  gap: FairValueGap,
+  opacity: number,
+): string {
+  return gap.direction === 'BULLISH'
+    ? `rgba(14, 165, 233, ${opacity})`
+    : `rgba(168, 85, 247, ${opacity})`;
+}
+
+function fairValueGapLabel(
+  gap: FairValueGap,
+): string {
+  const direction =
+    gap.direction === 'BULLISH'
+      ? 'FVG COMPRA'
+      : 'FVG VENDA';
+
+  const status =
+    gap.status === 'OPEN'
+      ? 'ABERTO'
+      : gap.status === 'PARTIAL'
+        ? `${gap.fillPercent}% PREENCHIDO`
+        : gap.status === 'FILLED'
+          ? 'PREENCHIDO'
+          : 'INVALIDADO';
+
+  return `${direction} · ${status} · ${gap.strength}`;
+}
+
 function MarketChart({
   asset,
   candles,
@@ -196,6 +230,9 @@ function MarketChart({
 
     const orderBlockAnalysis =
       analyzeOrderBlocks(candles);
+
+    const fairValueGapAnalysis =
+      analyzeFairValueGaps(candles);
 
     const chart = createChart(container, {
       width: container.clientWidth,
@@ -420,11 +457,42 @@ function MarketChart({
               : `OB↓ ${block.strength}`,
         }));
 
+    const fairValueGapMarkers =
+      fairValueGapAnalysis.gaps
+        .filter(
+          (gap) =>
+            gap.status === 'OPEN' ||
+            gap.status === 'PARTIAL',
+        )
+        .slice(-8)
+        .map((gap) => ({
+          time: toTimestamp(
+            gap.confirmationTime,
+          ),
+          position:
+            gap.direction === 'BULLISH'
+              ? ('belowBar' as const)
+              : ('aboveBar' as const),
+          color:
+            gap.direction === 'BULLISH'
+              ? '#38bdf8'
+              : '#c084fc',
+          shape:
+            gap.direction === 'BULLISH'
+              ? ('arrowUp' as const)
+              : ('arrowDown' as const),
+          text:
+            gap.direction === 'BULLISH'
+              ? `FVG↑ ${gap.strength}`
+              : `FVG↓ ${gap.strength}`,
+        }));
+
     createSeriesMarkers(
       candleSeries,
       [
         ...structureMarkers,
         ...orderBlockMarkers,
+        ...fairValueGapMarkers,
       ].sort(
         (first, second) =>
           Number(first.time) -
@@ -494,6 +562,36 @@ function MarketChart({
       });
     }
 
+    if (
+      fairValueGapAnalysis.nearestBullish
+    ) {
+      candleSeries.createPriceLine({
+        price:
+          fairValueGapAnalysis
+            .nearestBullish.midpoint,
+        color: '#0ea5e9',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: true,
+        title: 'FVG Compra',
+      });
+    }
+
+    if (
+      fairValueGapAnalysis.nearestBearish
+    ) {
+      candleSeries.createPriceLine({
+        price:
+          fairValueGapAnalysis
+            .nearestBearish.midpoint,
+        color: '#a855f7',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: true,
+        title: 'FVG Venda',
+      });
+    }
+
     candleSeries.createPriceLine({
       price: result.entry,
       color: '#38bdf8',
@@ -559,6 +657,15 @@ function MarketChart({
           second.startIndex,
       )
       .slice(-6);
+
+    const visibleFairValueGaps =
+      fairValueGapAnalysis.gaps
+        .filter(
+          (gap) =>
+            gap.status === 'OPEN' ||
+            gap.status === 'PARTIAL',
+        )
+        .slice(-6);
 
     const renderOrderBlockZones = () => {
       orderBlockOverlay.replaceChildren();
@@ -687,6 +794,101 @@ function MarketChart({
           zone,
         );
       }
+
+      for (const gap of visibleFairValueGaps) {
+        const startX =
+          chart
+            .timeScale()
+            .timeToCoordinate(
+              toTimestamp(gap.startTime),
+            );
+
+        const endX =
+          chart
+            .timeScale()
+            .timeToCoordinate(
+              toTimestamp(lastCandle.time),
+            );
+
+        const highY =
+          candleSeries.priceToCoordinate(
+            gap.high,
+          );
+
+        const lowY =
+          candleSeries.priceToCoordinate(
+            gap.low,
+          );
+
+        if (
+          startX === null ||
+          endX === null ||
+          highY === null ||
+          lowY === null
+        ) {
+          continue;
+        }
+
+        const zone =
+          document.createElement('div');
+
+        zone.style.position = 'absolute';
+        zone.style.left = `${Math.min(
+          startX,
+          endX,
+        )}px`;
+        zone.style.top = `${Math.min(
+          highY,
+          lowY,
+        )}px`;
+        zone.style.width = `${Math.max(
+          18,
+          Math.abs(endX - startX),
+        )}px`;
+        zone.style.height = `${Math.max(
+          4,
+          Math.abs(lowY - highY),
+        )}px`;
+        zone.style.borderRadius = '3px';
+        zone.style.boxSizing = 'border-box';
+        zone.style.background =
+          fairValueGapColor(
+            gap,
+            gap.status === 'OPEN'
+              ? 0.12
+              : 0.06,
+          );
+        zone.style.border =
+          `1px dashed ${fairValueGapColor(
+            gap,
+            gap.status === 'OPEN'
+              ? 0.75
+              : 0.35,
+          )}`;
+
+        const label =
+          document.createElement('span');
+
+        label.textContent =
+          fairValueGapLabel(gap);
+        label.style.position = 'absolute';
+        label.style.left = '5px';
+        label.style.top = '2px';
+        label.style.padding = '1px 4px';
+        label.style.borderRadius = '4px';
+        label.style.background =
+          'rgba(7, 16, 31, 0.82)';
+        label.style.color =
+          gap.direction === 'BULLISH'
+            ? '#7dd3fc'
+            : '#d8b4fe';
+        label.style.fontSize = '9px';
+        label.style.fontWeight = '700';
+        label.style.whiteSpace = 'nowrap';
+
+        zone.appendChild(label);
+        orderBlockOverlay.appendChild(zone);
+      }
     };
 
     const handleVisibleRangeChange =
@@ -748,6 +950,9 @@ function MarketChart({
   const orderBlockAnalysis =
     analyzeOrderBlocks(candles);
 
+  const fairValueGapAnalysis =
+    analyzeFairValueGaps(candles);
+
   const structureTrend =
     marketStructure.trend === 'BULLISH'
       ? {
@@ -776,7 +981,7 @@ function MarketChart({
             </div>
 
             <div className="text-[10px] text-slate-600">
-              Candles, médias e estrutura SMC
+              Candles, médias, SMC, OB e FVG
             </div>
           </div>
         </div>
@@ -862,6 +1067,55 @@ function MarketChart({
         />
       </div>
 
+      <div className="grid grid-cols-2 gap-2 border-t border-white/[0.06] bg-ink-950/40 px-3.5 py-3 sm:grid-cols-4">
+        <MiniStat
+          label="FVG abertos"
+          value={`${fairValueGapAnalysis.open.length}`}
+          tone={
+            fairValueGapAnalysis.open.length > 0
+              ? 'bull'
+              : 'wait'
+          }
+        />
+
+        <MiniStat
+          label="FVG compra"
+          value={
+            fairValueGapAnalysis.nearestBullish
+              ? formatPrice(
+                  asset,
+                  fairValueGapAnalysis
+                    .nearestBullish.midpoint,
+                )
+              : '—'
+          }
+          tone="bull"
+        />
+
+        <MiniStat
+          label="FVG venda"
+          value={
+            fairValueGapAnalysis.nearestBearish
+              ? formatPrice(
+                  asset,
+                  fairValueGapAnalysis
+                    .nearestBearish.midpoint,
+                )
+              : '—'
+          }
+          tone="bear"
+        />
+
+        <MiniStat
+          label="Maior FVG"
+          value={`${fairValueGapAnalysis.gaps.reduce(
+            (maximum, gap) =>
+              Math.max(maximum, gap.strength),
+            0,
+          )}`}
+        />
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] px-3.5 py-2.5">
         <div className="flex items-center gap-3 text-[10px]">
           <span className="text-accent-400">
@@ -898,6 +1152,15 @@ function MarketChart({
 
           <span className="text-rose-300">
             OB venda
+          </span>
+
+
+          <span className="text-sky-300">
+            FVG compra
+          </span>
+
+          <span className="text-purple-300">
+            FVG venda
           </span>
         </div>
 
