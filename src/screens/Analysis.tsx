@@ -10,6 +10,7 @@ import {
   CrosshairMode,
   LineSeries,
   createChart,
+  createSeriesMarkers,
   type CandlestickData,
   type LineData,
   type UTCTimestamp,
@@ -36,6 +37,10 @@ import {
   META_BY_KEY,
   signalLabel,
 } from '@/lib/indicators';
+
+import {
+  analyzeMarketStructure,
+} from '@/lib/marketStructure';
 
 import {
   ArrowUpCircle,
@@ -152,6 +157,9 @@ function MarketChart({
     if (!container || candles.length === 0) {
       return;
     }
+
+    const marketStructure =
+      analyzeMarketStructure(candles);
 
     const chart = createChart(container, {
       width: container.clientWidth,
@@ -303,6 +311,79 @@ function MarketChart({
     ema9Series.setData(ema9Data);
     ema21Series.setData(ema21Data);
 
+    const structureMarkers =
+      marketStructure.events
+        .slice(-12)
+        .map((event) => {
+          const bullish =
+            event.type === 'BOS_BULL' ||
+            event.type === 'CHOCH_BULL';
+
+          const choch =
+            event.type === 'CHOCH_BULL' ||
+            event.type === 'CHOCH_BEAR';
+
+          return {
+            time: toTimestamp(event.time),
+            position: bullish
+              ? ('belowBar' as const)
+              : ('aboveBar' as const),
+            color: bullish
+              ? choch
+                ? '#22d3ee'
+                : '#10b981'
+              : choch
+                ? '#c084fc'
+                : '#ef4444',
+            shape: bullish
+              ? ('arrowUp' as const)
+              : ('arrowDown' as const),
+            text: event.label,
+          };
+        })
+        .sort(
+          (first, second) =>
+            Number(first.time) -
+            Number(second.time),
+        );
+
+    createSeriesMarkers(
+      candleSeries,
+      structureMarkers,
+    );
+
+    marketStructure.supports
+      .slice(0, 3)
+      .forEach((level, index) => {
+        candleSeries.createPriceLine({
+          price: level.price,
+          color:
+            index === 0
+              ? '#22c55e'
+              : 'rgba(34, 197, 94, 0.55)',
+          lineWidth: 1,
+          lineStyle: 3,
+          axisLabelVisible: true,
+          title: `Suporte ${level.touches}x`,
+        });
+      });
+
+    marketStructure.resistances
+      .slice(0, 3)
+      .forEach((level, index) => {
+        candleSeries.createPriceLine({
+          price: level.price,
+          color:
+            index === 0
+              ? '#f97316'
+              : 'rgba(249, 115, 22, 0.55)',
+          lineWidth: 1,
+          lineStyle: 3,
+          axisLabelVisible: true,
+          title: `Resist. ${level.touches}x`,
+        });
+      });
+
     candleSeries.createPriceLine({
       price: result.entry,
       color: '#38bdf8',
@@ -358,6 +439,25 @@ function MarketChart({
     result.target,
   ]);
 
+  const marketStructure =
+    analyzeMarketStructure(candles);
+
+  const structureTrend =
+    marketStructure.trend === 'BULLISH'
+      ? {
+          label: 'Estrutura de alta',
+          className: 'text-bull-400',
+        }
+      : marketStructure.trend === 'BEARISH'
+        ? {
+            label: 'Estrutura de baixa',
+            className: 'text-bear-400',
+          }
+        : {
+            label: 'Estrutura lateral',
+            className: 'text-wait-400',
+          };
+
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/[0.06] bg-[#07101f]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-3.5 py-3">
@@ -370,7 +470,7 @@ function MarketChart({
             </div>
 
             <div className="text-[10px] text-slate-600">
-              Candles e médias móveis
+              Candles, médias e estrutura SMC
             </div>
           </div>
         </div>
@@ -386,8 +486,10 @@ function MarketChart({
             EMA 21
           </span>
 
-          <span className="flex items-center gap-1.5 text-slate-500">
-            Zoom e arraste habilitados
+          <span
+            className={`flex items-center gap-1.5 ${structureTrend.className}`}
+          >
+            {structureTrend.label}
           </span>
         </div>
       </div>
@@ -409,6 +511,22 @@ function MarketChart({
 
           <span className="text-bull-400">
             Alvo
+          </span>
+
+          <span className="text-emerald-400">
+            BOS alta
+          </span>
+
+          <span className="text-red-400">
+            BOS baixa
+          </span>
+
+          <span className="text-cyan-400">
+            CHOCH alta
+          </span>
+
+          <span className="text-purple-400">
+            CHOCH baixa
           </span>
         </div>
 
@@ -647,6 +765,47 @@ export default function AnalysisScreen({
               asset={asset}
               candles={candles}
               result={result}
+            />
+          </section>
+
+          <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <MiniStat
+              label="Estrutura SMC"
+              value={
+                analyzeMarketStructure(candles).trend ===
+                'BULLISH'
+                  ? 'ALTA'
+                  : analyzeMarketStructure(candles).trend ===
+                      'BEARISH'
+                    ? 'BAIXA'
+                    : 'LATERAL'
+              }
+              tone={
+                analyzeMarketStructure(candles).trend ===
+                'BULLISH'
+                  ? 'bull'
+                  : analyzeMarketStructure(candles).trend ===
+                      'BEARISH'
+                    ? 'bear'
+                    : 'wait'
+              }
+            />
+
+            <MiniStat
+              label="BOS / CHOCH"
+              value={`${analyzeMarketStructure(candles).events.length}`}
+            />
+
+            <MiniStat
+              label="Suportes"
+              value={`${analyzeMarketStructure(candles).supports.length}`}
+              tone="bull"
+            />
+
+            <MiniStat
+              label="Resistências"
+              value={`${analyzeMarketStructure(candles).resistances.length}`}
+              tone="bear"
             />
           </section>
 
