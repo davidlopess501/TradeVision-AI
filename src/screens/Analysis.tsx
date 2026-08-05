@@ -43,6 +43,11 @@ import {
 } from '@/lib/marketStructure';
 
 import {
+  analyzeOrderBlocks,
+  type OrderBlock,
+} from '@/lib/orderBlocks';
+
+import {
   ArrowUpCircle,
   ArrowDownCircle,
   CircleDot,
@@ -142,6 +147,34 @@ function calculateEmaSeries(
   return result;
 }
 
+
+function orderBlockColor(
+  block: OrderBlock,
+  opacity: number,
+): string {
+  return block.direction === 'BULLISH'
+    ? `rgba(16, 185, 129, ${opacity})`
+    : `rgba(239, 68, 68, ${opacity})`;
+}
+
+function orderBlockLabel(
+  block: OrderBlock,
+): string {
+  const direction =
+    block.direction === 'BULLISH'
+      ? 'OB COMPRA'
+      : 'OB VENDA';
+
+  const status =
+    block.status === 'ACTIVE'
+      ? 'ATIVO'
+      : block.status === 'MITIGATED'
+        ? 'MITIGADO'
+        : 'INVALIDADO';
+
+  return `${direction} · ${status} · ${block.strength}`;
+}
+
 function MarketChart({
   asset,
   candles,
@@ -160,6 +193,9 @@ function MarketChart({
 
     const marketStructure =
       analyzeMarketStructure(candles);
+
+    const orderBlockAnalysis =
+      analyzeOrderBlocks(candles);
 
     const chart = createChart(container, {
       width: container.clientWidth,
@@ -347,9 +383,53 @@ function MarketChart({
             Number(second.time),
         );
 
+    const orderBlockMarkers =
+      [
+        ...orderBlockAnalysis.bullish,
+        ...orderBlockAnalysis.bearish,
+      ]
+        .filter(
+          (block) =>
+            block.status !==
+            'INVALIDATED',
+        )
+        .slice(-8)
+        .map((block) => ({
+          time: toTimestamp(
+            block.confirmationTime,
+          ),
+          position:
+            block.direction ===
+            'BULLISH'
+              ? ('belowBar' as const)
+              : ('aboveBar' as const),
+          color:
+            block.direction ===
+            'BULLISH'
+              ? '#34d399'
+              : '#fb7185',
+          shape:
+            block.direction ===
+            'BULLISH'
+              ? ('arrowUp' as const)
+              : ('arrowDown' as const),
+          text:
+            block.direction ===
+            'BULLISH'
+              ? `OB↑ ${block.strength}`
+              : `OB↓ ${block.strength}`,
+        }));
+
     createSeriesMarkers(
       candleSeries,
-      structureMarkers,
+      [
+        ...structureMarkers,
+        ...orderBlockMarkers,
+      ].sort(
+        (first, second) =>
+          Number(first.time) -
+          Number(second.time),
+      ),
     );
 
     marketStructure.supports
@@ -384,6 +464,36 @@ function MarketChart({
         });
       });
 
+    if (
+      orderBlockAnalysis.nearestBullish
+    ) {
+      candleSeries.createPriceLine({
+        price:
+          orderBlockAnalysis
+            .nearestBullish.midpoint,
+        color: '#10b981',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: true,
+        title: 'OB Compra',
+      });
+    }
+
+    if (
+      orderBlockAnalysis.nearestBearish
+    ) {
+      candleSeries.createPriceLine({
+        price:
+          orderBlockAnalysis
+            .nearestBearish.midpoint,
+        color: '#ef4444',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: true,
+        title: 'OB Venda',
+      });
+    }
+
     candleSeries.createPriceLine({
       price: result.entry,
       color: '#38bdf8',
@@ -413,6 +523,187 @@ function MarketChart({
 
     chart.timeScale().fitContent();
 
+    container.style.position =
+      'relative';
+
+    const orderBlockOverlay =
+      document.createElement('div');
+
+    orderBlockOverlay.style.position =
+      'absolute';
+    orderBlockOverlay.style.inset = '0';
+    orderBlockOverlay.style.pointerEvents =
+      'none';
+    orderBlockOverlay.style.zIndex = '3';
+    orderBlockOverlay.style.overflow =
+      'hidden';
+
+    container.appendChild(
+      orderBlockOverlay,
+    );
+
+    const visibleOrderBlocks = [
+      ...orderBlockAnalysis.active,
+      ...[
+        ...orderBlockAnalysis.bullish,
+        ...orderBlockAnalysis.bearish,
+      ].filter(
+        (block) =>
+          block.status ===
+          'MITIGATED',
+      ),
+    ]
+      .sort(
+        (first, second) =>
+          first.startIndex -
+          second.startIndex,
+      )
+      .slice(-6);
+
+    const renderOrderBlockZones = () => {
+      orderBlockOverlay.replaceChildren();
+
+      const lastCandle =
+        candles[candles.length - 1];
+
+      if (!lastCandle) return;
+
+      for (const block of visibleOrderBlocks) {
+        const startX =
+          chart
+            .timeScale()
+            .timeToCoordinate(
+              toTimestamp(
+                block.startTime,
+              ),
+            );
+
+        const endX =
+          chart
+            .timeScale()
+            .timeToCoordinate(
+              toTimestamp(
+                lastCandle.time,
+              ),
+            );
+
+        const highY =
+          candleSeries.priceToCoordinate(
+            block.high,
+          );
+
+        const lowY =
+          candleSeries.priceToCoordinate(
+            block.low,
+          );
+
+        if (
+          startX === null ||
+          endX === null ||
+          highY === null ||
+          lowY === null
+        ) {
+          continue;
+        }
+
+        const left = Math.min(
+          startX,
+          endX,
+        );
+
+        const top = Math.min(
+          highY,
+          lowY,
+        );
+
+        const width = Math.max(
+          18,
+          Math.abs(endX - startX),
+        );
+
+        const height = Math.max(
+          4,
+          Math.abs(lowY - highY),
+        );
+
+        const zone =
+          document.createElement('div');
+
+        zone.style.position =
+          'absolute';
+        zone.style.left = `${left}px`;
+        zone.style.top = `${top}px`;
+        zone.style.width = `${width}px`;
+        zone.style.height = `${height}px`;
+        zone.style.borderRadius =
+          '3px';
+        zone.style.background =
+          orderBlockColor(
+            block,
+            block.status ===
+              'ACTIVE'
+              ? 0.14
+              : 0.07,
+          );
+        zone.style.border =
+          `1px solid ${orderBlockColor(
+            block,
+            block.status ===
+              'ACTIVE'
+              ? 0.78
+              : 0.36,
+          )}`;
+        zone.style.boxSizing =
+          'border-box';
+
+        const label =
+          document.createElement('span');
+
+        label.textContent =
+          orderBlockLabel(block);
+        label.style.position =
+          'absolute';
+        label.style.left = '5px';
+        label.style.top = '2px';
+        label.style.padding =
+          '1px 4px';
+        label.style.borderRadius =
+          '4px';
+        label.style.background =
+          'rgba(7, 16, 31, 0.82)';
+        label.style.color =
+          block.direction ===
+          'BULLISH'
+            ? '#6ee7b7'
+            : '#fda4af';
+        label.style.fontSize = '9px';
+        label.style.fontWeight =
+          '700';
+        label.style.whiteSpace =
+          'nowrap';
+
+        zone.appendChild(label);
+        orderBlockOverlay.appendChild(
+          zone,
+        );
+      }
+    };
+
+    const handleVisibleRangeChange =
+      () => {
+        renderOrderBlockZones();
+      };
+
+    chart
+      .timeScale()
+      .subscribeVisibleLogicalRangeChange(
+        handleVisibleRangeChange,
+      );
+
+    requestAnimationFrame(
+      renderOrderBlockZones,
+    );
+
     const resizeObserver =
       new ResizeObserver((entries) => {
         const entry = entries[0];
@@ -423,12 +714,24 @@ function MarketChart({
           width:
             entry.contentRect.width,
         });
+
+        requestAnimationFrame(
+          renderOrderBlockZones,
+        );
       });
 
     resizeObserver.observe(container);
 
     return () => {
       resizeObserver.disconnect();
+
+      chart
+        .timeScale()
+        .unsubscribeVisibleLogicalRangeChange(
+          handleVisibleRangeChange,
+        );
+
+      orderBlockOverlay.remove();
       chart.remove();
     };
   }, [
@@ -441,6 +744,9 @@ function MarketChart({
 
   const marketStructure =
     analyzeMarketStructure(candles);
+
+  const orderBlockAnalysis =
+    analyzeOrderBlocks(candles);
 
   const structureTrend =
     marketStructure.trend === 'BULLISH'
@@ -499,6 +805,63 @@ function MarketChart({
         className="h-[390px] w-full"
       />
 
+      <div className="grid grid-cols-2 gap-2 border-t border-white/[0.06] bg-ink-950/40 px-3.5 py-3 sm:grid-cols-4">
+        <MiniStat
+          label="OB ativos"
+          value={`${orderBlockAnalysis.active.length}`}
+          tone={
+            orderBlockAnalysis.active.length > 0
+              ? 'bull'
+              : 'wait'
+          }
+        />
+
+        <MiniStat
+          label="OB compra"
+          value={
+            orderBlockAnalysis.nearestBullish
+              ? formatPrice(
+                  asset,
+                  orderBlockAnalysis
+                    .nearestBullish.midpoint,
+                )
+              : '—'
+          }
+          tone="bull"
+        />
+
+        <MiniStat
+          label="OB venda"
+          value={
+            orderBlockAnalysis.nearestBearish
+              ? formatPrice(
+                  asset,
+                  orderBlockAnalysis
+                    .nearestBearish.midpoint,
+                )
+              : '—'
+          }
+          tone="bear"
+        />
+
+        <MiniStat
+          label="Maior força"
+          value={`${
+            [
+              ...orderBlockAnalysis.bullish,
+              ...orderBlockAnalysis.bearish,
+            ].reduce(
+              (maximum, block) =>
+                Math.max(
+                  maximum,
+                  block.strength,
+                ),
+              0,
+            )
+          }`}
+        />
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] px-3.5 py-2.5">
         <div className="flex items-center gap-3 text-[10px]">
           <span className="text-accent-400">
@@ -527,6 +890,14 @@ function MarketChart({
 
           <span className="text-purple-400">
             CHOCH baixa
+          </span>
+
+          <span className="text-emerald-300">
+            OB compra
+          </span>
+
+          <span className="text-rose-300">
+            OB venda
           </span>
         </div>
 
