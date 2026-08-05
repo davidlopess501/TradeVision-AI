@@ -11,6 +11,10 @@ import { getMarketDataProvider } from '@/services/types';
 import { useStore } from '@/store';
 import { formatPrice } from '@/lib/assets';
 import { analyzeFibonacci } from '@/lib/fibonacci';
+import {
+  analyzeMultipleTimeframes,
+  type MultiTimeframeAnalysis,
+} from '@/lib/multiTimeframe';
 
 import { RefreshCw } from 'lucide-react';
 
@@ -24,6 +28,7 @@ import { IndicatorCards } from '@/components/analysis/IndicatorCards';
 import { SignalPanel } from '@/components/analysis/SignalPanel';
 import { SmartMoneyPanel } from '@/components/analysis/SmartMoneyPanel';
 import { FibonacciPanel } from '@/components/analysis/FibonacciPanel';
+import { MultiTimeframePanel } from '@/components/analysis/MultiTimeframePanel';
 
 interface AnalysisScreenProps {
   initialAsset: Asset;
@@ -55,6 +60,15 @@ export default function AnalysisScreen({
     useState(false);
 
   const [error, setError] =
+    useState<string | null>(null);
+
+  const [multiTimeframe, setMultiTimeframe] =
+    useState<MultiTimeframeAnalysis | null>(null);
+
+  const [multiTimeframeLoading, setMultiTimeframeLoading] =
+    useState(false);
+
+  const [multiTimeframeError, setMultiTimeframeError] =
     useState<string | null>(null);
 
   const fibonacciAnalysis = useMemo(
@@ -94,11 +108,37 @@ export default function AnalysisScreen({
     }
   }
 
+  async function runMultiTimeframe() {
+    setMultiTimeframeLoading(true);
+    setMultiTimeframeError(null);
+
+    try {
+      const nextAnalysis =
+        await analyzeMultipleTimeframes(asset);
+
+      setMultiTimeframe(nextAnalysis);
+    } catch (caughtError) {
+      setMultiTimeframeError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Não foi possível analisar os múltiplos timeframes.',
+      );
+    } finally {
+      setMultiTimeframeLoading(false);
+    }
+  }
+
   useEffect(() => {
     void run();
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset, timeframe]);
+
+  useEffect(() => {
+    void runMultiTimeframe();
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset]);
 
   return (
     <div className="space-y-5">
@@ -174,6 +214,15 @@ export default function AnalysisScreen({
               )}
             />
           )}
+
+          <MultiTimeframePanel
+            analysis={multiTimeframe}
+            loading={multiTimeframeLoading}
+            error={multiTimeframeError}
+            onRefresh={() =>
+              void runMultiTimeframe()
+            }
+          />
 
           <section className="card animate-fade-up p-4 sm:p-5">
             <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-between">
