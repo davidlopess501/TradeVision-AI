@@ -53,6 +53,14 @@ import {
 } from '@/lib/fairValueGaps';
 
 import {
+  analyzeLiquiditySweeps,
+} from '@/lib/liquiditySweeps';
+
+import {
+  analyzeFibonacci,
+} from '@/lib/fibonacci';
+
+import {
   ArrowUpCircle,
   ArrowDownCircle,
   CircleDot,
@@ -233,6 +241,12 @@ function MarketChart({
 
     const fairValueGapAnalysis =
       analyzeFairValueGaps(candles);
+
+    const liquiditySweepAnalysis =
+      analyzeLiquiditySweeps(candles);
+
+    const fibonacciAnalysis =
+      analyzeFibonacci(candles);
 
     const chart = createChart(container, {
       width: container.clientWidth,
@@ -487,12 +501,41 @@ function MarketChart({
               : `FVG↓ ${gap.strength}`,
         }));
 
+
+    const liquiditySweepMarkers =
+      liquiditySweepAnalysis.sweeps
+        .slice(-10)
+        .map((sweep) => ({
+          time: toTimestamp(sweep.time),
+          position:
+            sweep.direction === 'BULLISH'
+              ? ('belowBar' as const)
+              : ('aboveBar' as const),
+          color:
+            sweep.direction === 'BULLISH'
+              ? sweep.status === 'CONFIRMED'
+                ? '#2dd4bf'
+                : '#5eead4'
+              : sweep.status === 'CONFIRMED'
+                ? '#f43f5e'
+                : '#fda4af',
+          shape:
+            sweep.direction === 'BULLISH'
+              ? ('arrowUp' as const)
+              : ('arrowDown' as const),
+          text:
+            sweep.direction === 'BULLISH'
+              ? `SWEEP↑ ${sweep.strength}`
+              : `SWEEP↓ ${sweep.strength}`,
+        }));
+
     createSeriesMarkers(
       candleSeries,
       [
         ...structureMarkers,
         ...orderBlockMarkers,
         ...fairValueGapMarkers,
+        ...liquiditySweepMarkers,
       ].sort(
         (first, second) =>
           Number(first.time) -
@@ -590,6 +633,70 @@ function MarketChart({
         axisLabelVisible: true,
         title: 'FVG Venda',
       });
+    }
+
+
+    if (
+      liquiditySweepAnalysis.nearestBullish
+    ) {
+      candleSeries.createPriceLine({
+        price:
+          liquiditySweepAnalysis
+            .nearestBullish.sweptLevel,
+        color: '#14b8a6',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: true,
+        title: 'Sweep Compra',
+      });
+    }
+
+    if (
+      liquiditySweepAnalysis.nearestBearish
+    ) {
+      candleSeries.createPriceLine({
+        price:
+          liquiditySweepAnalysis
+            .nearestBearish.sweptLevel,
+        color: '#f43f5e',
+        lineWidth: 1,
+        lineStyle: 3,
+        axisLabelVisible: true,
+        title: 'Sweep Venda',
+      });
+    }
+
+    if (fibonacciAnalysis) {
+      const fibonacciColors: Record<string, string> = {
+        '23,6%': '#64748b',
+        '38,2%': '#60a5fa',
+        '50%': '#facc15',
+        '61,8%': '#f59e0b',
+        '78,6%': '#f97316',
+        '127,2%': '#a78bfa',
+        '161,8%': '#c084fc',
+      };
+
+      fibonacciAnalysis.levels
+        .filter(
+          (level) =>
+            level.label !== '0%' &&
+            level.label !== '100%',
+        )
+        .forEach((level) => {
+          candleSeries.createPriceLine({
+            price: level.price,
+            color:
+              fibonacciColors[level.label] ??
+              'rgba(148, 163, 184, 0.55)',
+            lineWidth:
+              level.label === '61,8%' ? 2 : 1,
+            lineStyle:
+              level.type === 'EXTENSION' ? 2 : 3,
+            axisLabelVisible: true,
+            title: `Fib ${level.label}`,
+          });
+        });
     }
 
     candleSeries.createPriceLine({
@@ -953,6 +1060,12 @@ function MarketChart({
   const fairValueGapAnalysis =
     analyzeFairValueGaps(candles);
 
+  const liquiditySweepAnalysis =
+    analyzeLiquiditySweeps(candles);
+
+  const fibonacciAnalysis =
+    analyzeFibonacci(candles);
+
   const structureTrend =
     marketStructure.trend === 'BULLISH'
       ? {
@@ -981,7 +1094,7 @@ function MarketChart({
             </div>
 
             <div className="text-[10px] text-slate-600">
-              Candles, médias, SMC, OB e FVG
+              Candles, SMC, OB, FVG, Liquidity Sweep e Fibonacci
             </div>
           </div>
         </div>
@@ -1116,6 +1229,104 @@ function MarketChart({
         />
       </div>
 
+
+      <div className="grid grid-cols-2 gap-2 border-t border-white/[0.06] bg-ink-950/40 px-3.5 py-3 sm:grid-cols-4">
+        <MiniStat
+          label="Sweeps confirmados"
+          value={`${liquiditySweepAnalysis.confirmed.length}`}
+          tone={
+            liquiditySweepAnalysis.confirmed.length > 0
+              ? 'bull'
+              : 'wait'
+          }
+        />
+
+        <MiniStat
+          label="Sweep compra"
+          value={
+            liquiditySweepAnalysis.nearestBullish
+              ? formatPrice(
+                  asset,
+                  liquiditySweepAnalysis
+                    .nearestBullish.sweptLevel,
+                )
+              : '—'
+          }
+          tone="bull"
+        />
+
+        <MiniStat
+          label="Sweep venda"
+          value={
+            liquiditySweepAnalysis.nearestBearish
+              ? formatPrice(
+                  asset,
+                  liquiditySweepAnalysis
+                    .nearestBearish.sweptLevel,
+                )
+              : '—'
+          }
+          tone="bear"
+        />
+
+        <MiniStat
+          label="Maior sweep"
+          value={`${liquiditySweepAnalysis.sweeps.reduce(
+            (maximum, sweep) =>
+              Math.max(maximum, sweep.strength),
+            0,
+          )}`}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 border-t border-white/[0.06] bg-ink-950/40 px-3.5 py-3 sm:grid-cols-4">
+        <MiniStat
+          label="Fib direção"
+          value={
+            fibonacciAnalysis
+              ? fibonacciAnalysis.direction === 'BULLISH'
+                ? 'ALTA'
+                : 'BAIXA'
+              : '—'
+          }
+          tone={
+            fibonacciAnalysis
+              ? fibonacciAnalysis.direction === 'BULLISH'
+                ? 'bull'
+                : 'bear'
+              : 'wait'
+          }
+        />
+
+        <MiniStat
+          label="Nível próximo"
+          value={
+            fibonacciAnalysis?.nearestLevel?.label ?? '—'
+          }
+        />
+
+        <MiniStat
+          label="Preço Fib"
+          value={
+            fibonacciAnalysis?.nearestLevel
+              ? formatPrice(
+                  asset,
+                  fibonacciAnalysis.nearestLevel.price,
+                )
+              : '—'
+          }
+        />
+
+        <MiniStat
+          label="Amplitude"
+          value={
+            fibonacciAnalysis
+              ? formatPrice(asset, fibonacciAnalysis.range)
+              : '—'
+          }
+        />
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] px-3.5 py-2.5">
         <div className="flex items-center gap-3 text-[10px]">
           <span className="text-accent-400">
@@ -1161,6 +1372,20 @@ function MarketChart({
 
           <span className="text-purple-300">
             FVG venda
+          </span>
+
+
+          <span className="text-teal-300">
+            Sweep compra
+          </span>
+
+          <span className="text-rose-300">
+            Sweep venda
+          </span>
+
+
+          <span className="text-amber-300">
+            Fibonacci
           </span>
         </div>
 
