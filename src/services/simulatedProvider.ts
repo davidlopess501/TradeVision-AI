@@ -12,6 +12,7 @@ import {
   INDICATOR_META,
   buildIndicator,
   buildRealEmaIndicators,
+  buildRealRsiIndicator,
   finalizeAnalysis,
 } from '@/lib/indicators';
 
@@ -27,10 +28,12 @@ function mulberry32(seed: number) {
 
 function hashStr(s: string): number {
   let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
+
+  for (let i = 0; i < s.length; i += 1) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
+
   return h >>> 0;
 }
 
@@ -52,9 +55,12 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
 
     const drift = (rng() - 0.5) * info.basePrice * 0.004;
     const price = info.basePrice + drift;
-    const open = price - (rng() - 0.5) * info.basePrice * 0.0025;
-    const high = Math.max(price, open) + rng() * info.basePrice * 0.0014;
-    const low = Math.min(price, open) - rng() * info.basePrice * 0.0014;
+    const open =
+      price - (rng() - 0.5) * info.basePrice * 0.0025;
+    const high =
+      Math.max(price, open) + rng() * info.basePrice * 0.0014;
+    const low =
+      Math.min(price, open) - rng() * info.basePrice * 0.0014;
     const changePct = ((price - open) / open) * 100;
     const spread = info.tick * (1 + Math.floor(rng() * 3));
 
@@ -70,7 +76,10 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
     };
   }
 
-  subscribeQuotes(asset: Asset, cb: (q: Quote) => void): () => void {
+  subscribeQuotes(
+    asset: Asset,
+    cb: (quote: Quote) => void,
+  ): () => void {
     let alive = true;
 
     const tick = async () => {
@@ -78,7 +87,9 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
 
       try {
         cb(await this.getQuote(asset));
-      } catch {}
+      } catch {
+        // Mantém a assinatura da interface sem derrubar a UI.
+      }
     };
 
     void tick();
@@ -97,30 +108,34 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
     count: number,
   ): Promise<Candle[]> {
     const info = ASSETS[asset];
-    const tfMin =
-      TIMEFRAMES.find((t) => t.value === timeframe)?.minutes ?? 1;
+    const timeframeMinutes =
+      TIMEFRAMES.find((item) => item.value === timeframe)?.minutes ??
+      1;
 
-    const rng = mulberry32(hashStr(`${asset}-${timeframe}-candles`));
+    const rng = mulberry32(
+      hashStr(`${asset}-${timeframe}-candles`),
+    );
 
     const now = Date.now();
-    const step = tfMin * 60000;
+    const step = timeframeMinutes * 60000;
 
     let price = info.basePrice * (0.995 + rng() * 0.01);
-
-    const vol = info.basePrice * 0.0012;
+    const volatility = info.basePrice * 0.0012;
 
     const candles: Candle[] = [];
 
-    for (let i = count - 1; i >= 0; i--) {
+    for (let index = count - 1; index >= 0; index -= 1) {
       const open = price;
-      const change = (rng() - 0.48) * vol;
+      const change = (rng() - 0.48) * volatility;
       const close = Math.max(info.tick, open + change);
-      const high = Math.max(open, close) + rng() * vol * 0.6;
-      const low = Math.min(open, close) - rng() * vol * 0.6;
+      const high =
+        Math.max(open, close) + rng() * volatility * 0.6;
+      const low =
+        Math.min(open, close) - rng() * volatility * 0.6;
       const volume = Math.round(500 + rng() * 4500);
 
       candles.push({
-        time: now - i * step,
+        time: now - index * step,
         open,
         high,
         low,
@@ -139,24 +154,36 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
     timeframe: Timeframe,
   ): Promise<IndicatorResult[]> {
     const quote = await this.getQuote(asset);
-    const candles = await this.getCandles(asset, timeframe, 120);
+    const candles = await this.getCandles(
+      asset,
+      timeframe,
+      120,
+    );
 
     const seed = hashStr(
       `${asset}-${timeframe}-${Math.floor(Date.now() / 30000)}`,
     );
-
     const rng = mulberry32(seed);
 
-    const realIndicators = buildRealEmaIndicators(
+    const realEmaIndicators = buildRealEmaIndicators(
       candles,
       ASSETS[asset].decimals,
     );
 
-    return INDICATOR_META.map((meta) => {
-      const real = realIndicators.find((i) => i.key === meta.key);
+    const realRsiIndicator = buildRealRsiIndicator(candles);
 
-      if (real) {
-        return real;
+    const realIndicators: IndicatorResult[] = [
+      ...realEmaIndicators,
+      realRsiIndicator,
+    ];
+
+    return INDICATOR_META.map((meta) => {
+      const realIndicator = realIndicators.find(
+        (indicator) => indicator.key === meta.key,
+      );
+
+      if (realIndicator) {
+        return realIndicator;
       }
 
       return buildIndicator(
@@ -174,7 +201,10 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
     timeframe: Timeframe,
   ): Promise<AnalysisResult> {
     const quote = await this.getQuote(asset);
-    const indicators = await this.getIndicators(asset, timeframe);
+    const indicators = await this.getIndicators(
+      asset,
+      timeframe,
+    );
 
     const base = finalizeAnalysis(
       asset,
