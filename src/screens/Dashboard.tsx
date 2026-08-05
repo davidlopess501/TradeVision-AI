@@ -28,6 +28,7 @@ export default function Dashboard({ onNavigate, onOpenSub, onAnalyzeAsset }: Das
     try {
       const [win, wdo] = await Promise.all([provider.analyze('WIN', '5m'), provider.analyze('WDO', '5m')]);
       setResults({ WIN: win, WDO: wdo });
+      onNavigate('analysis');
     } finally {
       setLoading(false);
       setScanning(false);
