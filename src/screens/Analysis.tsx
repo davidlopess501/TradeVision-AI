@@ -15,6 +15,10 @@ import {
   analyzeMultipleTimeframes,
   type MultiTimeframeAnalysis,
 } from '@/lib/multiTimeframe';
+import {
+  analyzeInstitutionalAI,
+  type InstitutionalAnalysis,
+} from '@/lib/institutionalAI';
 
 import { RefreshCw } from 'lucide-react';
 
@@ -29,6 +33,7 @@ import { SignalPanel } from '@/components/analysis/SignalPanel';
 import { SmartMoneyPanel } from '@/components/analysis/SmartMoneyPanel';
 import { FibonacciPanel } from '@/components/analysis/FibonacciPanel';
 import { MultiTimeframePanel } from '@/components/analysis/MultiTimeframePanel';
+import { InstitutionalPanel } from '@/components/analysis/InstitutionalPanel';
 
 interface AnalysisScreenProps {
   initialAsset: Asset;
@@ -70,6 +75,9 @@ export default function AnalysisScreen({
 
   const [multiTimeframeError, setMultiTimeframeError] =
     useState<string | null>(null);
+
+  const [institutionalAnalysis, setInstitutionalAnalysis] =
+    useState<InstitutionalAnalysis | null>(null);
 
   const fibonacciAnalysis = useMemo(
     () => analyzeFibonacci(candles),
@@ -139,6 +147,21 @@ export default function AnalysisScreen({
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asset]);
+
+  useEffect(() => {
+    if (!result || candles.length === 0) {
+      setInstitutionalAnalysis(null);
+      return;
+    }
+
+    setInstitutionalAnalysis(
+      analyzeInstitutionalAI({
+        result,
+        candles,
+        multiTimeframe,
+      }),
+    );
+  }, [result, candles, multiTimeframe]);
 
   return (
     <div className="space-y-5">
@@ -223,6 +246,12 @@ export default function AnalysisScreen({
               void runMultiTimeframe()
             }
           />
+
+          {institutionalAnalysis && (
+            <InstitutionalPanel
+              analysis={institutionalAnalysis}
+            />
+          )}
 
           <section className="card animate-fade-up p-4 sm:p-5">
             <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-between">
