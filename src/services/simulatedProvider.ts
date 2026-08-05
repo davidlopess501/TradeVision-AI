@@ -8,9 +8,12 @@ import type {
 } from '@/types';
 import type { IMarketDataProvider } from './types';
 import { ASSETS, TIMEFRAMES, formatPrice } from '@/lib/assets';
-import { INDICATOR_META, buildIndicator, finalizeAnalysis } from '@/lib/indicators';
-
-// ----- Deterministic PRNG so simulated data is stable per asset/timeframe/seed -----
+import {
+  INDICATOR_META,
+  buildIndicator,
+  buildRealEmaIndicators,
+  finalizeAnalysis,
+} from '@/lib/indicators';
 
 function mulberry32(seed: number) {
   return function () {
@@ -32,20 +35,21 @@ function hashStr(s: string): number {
 }
 
 function uid(): string {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+  return (
+    Math.random().toString(36).slice(2, 10) +
+    Date.now().toString(36).slice(-4)
+  );
 }
 
-/**
- * Simulated market data provider. Implements the same IMarketDataProvider
- * interface a real broker/data-vendor provider would — so it can be swapped
- * in the factory without touching the UI.
- */
 export class SimulatedMarketDataProvider implements IMarketDataProvider {
   readonly name = 'Simulado';
 
   async getQuote(asset: Asset): Promise<Quote> {
     const info = ASSETS[asset];
-    const rng = mulberry32(hashStr(`${asset}-quote-${Math.floor(Date.now() / 60000)}`));
+    const rng = mulberry32(
+      hashStr(`${asset}-quote-${Math.floor(Date.now() / 60000)}`),
+    );
+
     const drift = (rng() - 0.5) * info.basePrice * 0.004;
     const price = info.basePrice + drift;
     const open = price - (rng() - 0.5) * info.basePrice * 0.0025;
@@ -53,36 +57,60 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
     const low = Math.min(price, open) - rng() * info.basePrice * 0.0014;
     const changePct = ((price - open) / open) * 100;
     const spread = info.tick * (1 + Math.floor(rng() * 3));
-    return { asset, price, changePct, high, low, open, spread, updatedAt: Date.now() };
+
+    return {
+      asset,
+      price,
+      changePct,
+      high,
+      low,
+      open,
+      spread,
+      updatedAt: Date.now(),
+    };
   }
 
   subscribeQuotes(asset: Asset, cb: (q: Quote) => void): () => void {
     let alive = true;
+
     const tick = async () => {
       if (!alive) return;
+
       try {
         cb(await this.getQuote(asset));
-      } catch {
-        /* ignore */
-      }
+      } catch {}
     };
+
     void tick();
+
     const handle = window.setInterval(tick, 4000);
+
     return () => {
       alive = false;
       window.clearInterval(handle);
     };
   }
 
-  async getCandles(asset: Asset, timeframe: Timeframe, count: number): Promise<Candle[]> {
+  async getCandles(
+    asset: Asset,
+    timeframe: Timeframe,
+    count: number,
+  ): Promise<Candle[]> {
     const info = ASSETS[asset];
-    const tfMin = TIMEFRAMES.find((t) => t.value === timeframe)?.minutes ?? 1;
+    const tfMin =
+      TIMEFRAMES.find((t) => t.value === timeframe)?.minutes ?? 1;
+
     const rng = mulberry32(hashStr(`${asset}-${timeframe}-candles`));
+
     const now = Date.now();
-    const step = tfMin * 60_000;
+    const step = tfMin * 60000;
+
     let price = info.basePrice * (0.995 + rng() * 0.01);
+
     const vol = info.basePrice * 0.0012;
+
     const candles: Candle[] = [];
+
     for (let i = count - 1; i >= 0; i--) {
       const open = price;
       const change = (rng() - 0.48) * vol;
@@ -90,29 +118,76 @@ export class SimulatedMarketDataProvider implements IMarketDataProvider {
       const high = Math.max(open, close) + rng() * vol * 0.6;
       const low = Math.min(open, close) - rng() * vol * 0.6;
       const volume = Math.round(500 + rng() * 4500);
-      candles.push({ time: now - i * step, open, high, low, close, volume });
+
+      candles.push({
+        time: now - i * step,
+        open,
+        high,
+        low,
+        close,
+        volume,
+      });
+
       price = close;
     }
+
     return candles;
   }
 
-  async getIndicators(asset: Asset, timeframe: Timeframe): Promise<IndicatorResult[]> {
+  async getIndicators(
+    asset: Asset,
+    timeframe: Timeframe,
+  ): Promise<IndicatorResult[]> {
     const quote = await this.getQuote(asset);
-    const seed = hashStr(`${asset}-${timeframe}-${Math.floor(Date.now() / 30000)}`);
-    const rng = mulberry32(seed);
-    return INDICATOR_META.map((m) =>
-      buildIndicator(m.key, rng, asset, quote.price, ASSETS[asset].decimals),
+    const candles = await this.getCandles(asset, timeframe, 120);
+
+    const seed = hashStr(
+      `${asset}-${timeframe}-${Math.floor(Date.now() / 30000)}`,
     );
+
+    const rng = mulberry32(seed);
+
+    const realIndicators = buildRealEmaIndicators(
+      candles,
+      ASSETS[asset].decimals,
+    );
+
+    return INDICATOR_META.map((meta) => {
+      const real = realIndicators.find((i) => i.key === meta.key);
+
+      if (real) {
+        return real;
+      }
+
+      return buildIndicator(
+        meta.key,
+        rng,
+        asset,
+        quote.price,
+        ASSETS[asset].decimals,
+      );
+    });
   }
 
-  async analyze(asset: Asset, timeframe: Timeframe): Promise<AnalysisResult> {
+  async analyze(
+    asset: Asset,
+    timeframe: Timeframe,
+  ): Promise<AnalysisResult> {
     const quote = await this.getQuote(asset);
-    const seed = hashStr(`${asset}-${timeframe}-${Math.floor(Date.now() / 30000)}`);
-    const rng = mulberry32(seed);
-    const indicators = INDICATOR_META.map((m) =>
-      buildIndicator(m.key, rng, asset, quote.price, ASSETS[asset].decimals),
+    const indicators = await this.getIndicators(asset, timeframe);
+
+    const base = finalizeAnalysis(
+      asset,
+      timeframe,
+      indicators,
+      quote,
+      formatPrice,
     );
-    const base = finalizeAnalysis(asset, timeframe, indicators, quote, formatPrice);
-    return { ...base, id: uid(), createdAt: Date.now() };
+
+    return {
+      ...base,
+      id: uid(),
+      createdAt: Date.now(),
+    };
   }
 }

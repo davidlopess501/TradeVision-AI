@@ -6,9 +6,10 @@ import type {
   Signal,
   IndicatorKey,
   Quote,
+  Candle,
 } from '@/types';
 import { ASSETS, TIMEFRAMES, timeframesToMinutes } from '@/lib/assets';
-
+import { calculateEMA } from '@/lib/technicalIndicators';
 interface IndicatorMeta {
   key: IndicatorKey;
   label: string;
@@ -62,7 +63,73 @@ export function signalShort(s: Signal): string {
 }
 
 type Rng = () => number;
+function strengthFromDifference(
+  differencePercent: number,
+  sensitivity = 0.15,
+): number {
+  const normalized = differencePercent / sensitivity;
+  const strength = 50 + normalized * 25;
 
+  return Math.max(5, Math.min(95, Math.round(strength)));
+}
+
+export function buildRealEmaIndicators(
+  candles: Candle[],
+  decimals: number,
+): IndicatorResult[] {
+  if (candles.length < 21) {
+    throw new Error(
+      'São necessários pelo menos 21 candles para calcular EMA 9 e EMA 21.',
+    );
+  }
+
+  const closes = candles.map((candle) => candle.close);
+  const lastClose = closes[closes.length - 1];
+
+  const ema9 = calculateEMA(closes, 9);
+  const ema21 = calculateEMA(closes, 21);
+
+  const priceVsEma9Percent = ((lastClose - ema9) / ema9) * 100;
+  const ema9VsEma21Percent = ((ema9 - ema21) / ema21) * 100;
+
+  const ema9Strength = strengthFromDifference(priceVsEma9Percent);
+  const ema21Strength = strengthFromDifference(ema9VsEma21Percent);
+
+  const ema9Signal = signalFromStrength(ema9Strength);
+  const ema21Signal = signalFromStrength(ema21Strength);
+
+  const formatter = new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+
+  return [
+    {
+      key: 'ema9',
+      signal: ema9Signal,
+      value: formatter.format(ema9),
+      strength: ema9Strength,
+      detail:
+        lastClose > ema9
+          ? 'Preço acima da EMA 9'
+          : lastClose < ema9
+            ? 'Preço abaixo da EMA 9'
+            : 'Preço junto da EMA 9',
+    },
+    {
+      key: 'ema21',
+      signal: ema21Signal,
+      value: formatter.format(ema21),
+      strength: ema21Strength,
+      detail:
+        ema9 > ema21
+          ? 'EMA 9 acima da EMA 21 — estrutura altista'
+          : ema9 < ema21
+            ? 'EMA 9 abaixo da EMA 21 — estrutura baixista'
+            : 'EMA 9 e EMA 21 praticamente alinhadas',
+    },
+  ];
+}
 export function buildIndicator(
   key: IndicatorKey,
   rng: Rng,
