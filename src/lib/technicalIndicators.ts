@@ -27,6 +27,38 @@ export function calculateEMA(values: number[], period: number): number {
 }
 
 /**
+ * Calcula uma série completa de EMA.
+ */
+export function calculateEMASeries(
+  values: number[],
+  period: number,
+): number[] {
+  if (values.length < period) {
+    throw new Error(
+      `São necessários pelo menos ${period} valores para calcular a série EMA.`,
+    );
+  }
+
+  const result: number[] = [];
+
+  let ema =
+    values
+      .slice(0, period)
+      .reduce((total, value) => total + value, 0) / period;
+
+  result.push(ema);
+
+  const multiplier = 2 / (period + 1);
+
+  for (let index = period; index < values.length; index += 1) {
+    ema = (values[index] - ema) * multiplier + ema;
+    result.push(ema);
+  }
+
+  return result;
+}
+
+/**
  * Calcula o RSI pelo método suavizado de Wilder.
  */
 export function calculateRSI(
@@ -78,4 +110,51 @@ export function calculateRSI(
   const relativeStrength = averageGain / averageLoss;
 
   return 100 - 100 / (1 + relativeStrength);
+}
+
+export interface MacdResult {
+  macd: number;
+  signal: number;
+  histogram: number;
+}
+
+/**
+ * Calcula MACD 12, 26 e linha de sinal 9.
+ */
+export function calculateMACD(
+  values: number[],
+  fastPeriod = 12,
+  slowPeriod = 26,
+  signalPeriod = 9,
+): MacdResult {
+  if (values.length < slowPeriod + signalPeriod) {
+    throw new Error(
+      `São necessários pelo menos ${slowPeriod + signalPeriod} valores para calcular o MACD.`,
+    );
+  }
+
+  const fastSeries = calculateEMASeries(values, fastPeriod);
+  const slowSeries = calculateEMASeries(values, slowPeriod);
+
+  const offset = slowPeriod - fastPeriod;
+
+  const macdSeries = slowSeries.map(
+    (slowValue, index) =>
+      fastSeries[index + offset] - slowValue,
+  );
+
+  const signalSeries = calculateEMASeries(
+    macdSeries,
+    signalPeriod,
+  );
+
+  const macd = macdSeries[macdSeries.length - 1];
+  const signal = signalSeries[signalSeries.length - 1];
+  const histogram = macd - signal;
+
+  return {
+    macd,
+    signal,
+    histogram,
+  };
 }

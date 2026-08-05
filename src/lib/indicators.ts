@@ -18,6 +18,7 @@ import {
 import {
   calculateEMA,
   calculateRSI,
+  calculateMACD,
 } from '@/lib/technicalIndicators';
 
 interface IndicatorMeta {
@@ -81,8 +82,8 @@ const STRENGTH_SELL = 38;
 
 const WEIGHTS: Record<IndicatorKey, number> = {
   ema9: 1.2,
-  ema21: 1.0,
-  rsi: 1.0,
+  ema21: 1,
+  rsi: 1,
   macd: 1.3,
   volume: 0.9,
   atr: 0.6,
@@ -98,21 +99,18 @@ type Rng = () => number;
 export function signalFromStrength(strength: number): Signal {
   if (strength >= STRENGTH_BUY) return 'BUY';
   if (strength <= STRENGTH_SELL) return 'SELL';
-
   return 'WAIT';
 }
 
 export function signalLabel(signal: Signal): string {
   if (signal === 'BUY') return 'Compra';
   if (signal === 'SELL') return 'Venda';
-
   return 'Neutro';
 }
 
 export function signalShort(signal: Signal): string {
   if (signal === 'BUY') return 'COMPRA';
   if (signal === 'SELL') return 'VENDA';
-
   return 'AGUARDAR';
 }
 
@@ -123,10 +121,7 @@ function strengthFromDifference(
   const normalized = differencePercent / sensitivity;
   const strength = 50 + normalized * 25;
 
-  return Math.max(
-    5,
-    Math.min(95, Math.round(strength)),
-  );
+  return Math.max(5, Math.min(95, Math.round(strength)));
 }
 
 export function buildRealEmaIndicators(
@@ -159,9 +154,6 @@ export function buildRealEmaIndicators(
     ema9VsEma21Percent,
   );
 
-  const ema9Signal = signalFromStrength(ema9Strength);
-  const ema21Signal = signalFromStrength(ema21Strength);
-
   const formatter = new Intl.NumberFormat('pt-BR', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -170,7 +162,7 @@ export function buildRealEmaIndicators(
   return [
     {
       key: 'ema9',
-      signal: ema9Signal,
+      signal: signalFromStrength(ema9Strength),
       value: formatter.format(ema9),
       strength: ema9Strength,
       detail:
@@ -182,7 +174,7 @@ export function buildRealEmaIndicators(
     },
     {
       key: 'ema21',
-      signal: ema21Signal,
+      signal: signalFromStrength(ema21Strength),
       value: formatter.format(ema21),
       strength: ema21Strength,
       detail:
@@ -213,33 +205,21 @@ export function buildRealRsiIndicator(
 
   if (rsi >= 70) {
     signal = 'SELL';
-    strength = Math.max(
-      5,
-      Math.round(100 - rsi),
-    );
+    strength = Math.max(5, Math.round(100 - rsi));
     detail =
       'RSI em sobrecompra — atenção para possível correção';
   } else if (rsi <= 30) {
     signal = 'BUY';
-    strength = Math.min(
-      95,
-      Math.round(100 - rsi),
-    );
+    strength = Math.min(95, Math.round(100 - rsi));
     detail =
       'RSI em sobrevenda — atenção para possível recuperação';
   } else if (rsi >= 55) {
     signal = 'BUY';
-    strength = Math.min(
-      95,
-      Math.round(rsi),
-    );
+    strength = Math.min(95, Math.round(rsi));
     detail = 'RSI acima de 55 — momentum comprador';
   } else if (rsi <= 45) {
     signal = 'SELL';
-    strength = Math.max(
-      5,
-      Math.round(rsi),
-    );
+    strength = Math.max(5, Math.round(rsi));
     detail = 'RSI abaixo de 45 — momentum vendedor';
   }
 
@@ -249,6 +229,63 @@ export function buildRealRsiIndicator(
     value: rsi.toFixed(1),
     strength,
     detail,
+  };
+}
+
+export function buildRealMacdIndicator(
+  candles: Candle[],
+  decimals: number,
+): IndicatorResult {
+  if (candles.length < 35) {
+    throw new Error(
+      'São necessários pelo menos 35 candles para calcular o MACD.',
+    );
+  }
+
+  const closes = candles.map((candle) => candle.close);
+
+  const {
+    macd,
+    signal: signalLine,
+    histogram,
+  } = calculateMACD(closes, 12, 26, 9);
+
+  const reference =
+    Math.abs(closes[closes.length - 1]) || 1;
+
+  const histogramPercent =
+    (histogram / reference) * 100;
+
+  const strength = strengthFromDifference(
+    histogramPercent,
+    0.01,
+  );
+
+  const indicatorSignal = signalFromStrength(strength);
+
+  const formatter = new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: decimals + 1,
+    maximumFractionDigits: decimals + 1,
+  });
+
+  let detail = 'MACD próximo da linha de sinal';
+
+  if (histogram > 0) {
+    detail =
+      'MACD acima da linha de sinal — momentum altista';
+  } else if (histogram < 0) {
+    detail =
+      'MACD abaixo da linha de sinal — momentum baixista';
+  }
+
+  return {
+    key: 'macd',
+    signal: indicatorSignal,
+    value: formatter.format(macd),
+    strength,
+    detail:
+      `${detail}. Sinal: ${formatter.format(signalLine)} · ` +
+      `Histograma: ${formatter.format(histogram)}`,
   };
 }
 
@@ -463,8 +500,6 @@ export function finalizeAnalysis(
       ? quote.price + roundedStopDistance * 2
       : quote.price - roundedStopDistance * 2;
 
-  const entry = quote.price;
-
   const probability = Math.round(
     50 + bias * 0.6,
   );
@@ -488,7 +523,7 @@ export function finalizeAnalysis(
     high: quote.high,
     low: quote.low,
     open: quote.open,
-    entry,
+    entry: quote.price,
     stop,
     target,
     trend,
@@ -504,12 +539,13 @@ function mulberryHash(value: number): number {
   );
 
   result =
-    result +
-    Math.imul(
-      result ^ (result >>> 7),
-      61 | result,
-    ) ^
-    result;
+    (
+      result +
+      Math.imul(
+        result ^ (result >>> 7),
+        61 | result,
+      )
+    ) ^ result;
 
   return (
     ((result ^ (result >>> 14)) >>> 0) %
