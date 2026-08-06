@@ -19,6 +19,7 @@ import {
 
 import {
   testActiveProvider,
+  testFinnhubConnection,
 } from '@/services/marketGateway';
 
 import {
@@ -64,6 +65,11 @@ interface ConnectionResult {
   message: string;
   price?: string;
   updatedAt?: string;
+}
+
+interface FinnhubConnectionResult extends ConnectionResult {
+  symbol?: string;
+  changePct?: string;
 }
 
 const MODE_META: Record<
@@ -130,6 +136,15 @@ export default function Settings({
     state: 'IDLE',
     message:
       'Nenhum teste realizado nesta sessão.',
+  });
+
+  const [
+    finnhubResult,
+    setFinnhubResult,
+  ] = useState<FinnhubConnectionResult>({
+    state: 'IDLE',
+    message:
+      'Nenhum teste real realizado nesta sessão.',
   });
 
   const status = useMemo(
@@ -199,6 +214,55 @@ async function testConnection() {
     });
   }
 }
+
+  async function testFinnhub() {
+    setFinnhubResult({
+      state: 'TESTING',
+      message:
+        'Consultando cotação real da AAPL...',
+    });
+
+    try {
+      const result =
+        await testFinnhubConnection('AAPL');
+
+      if (
+        !result.success ||
+        !result.finnhubQuote
+      ) {
+        throw new Error(result.message);
+      }
+
+      const quote =
+        result.finnhubQuote;
+
+      setFinnhubResult({
+        state: 'SUCCESS',
+        message: result.message,
+        symbol: quote.symbol,
+        price: quote.price.toLocaleString(
+          'pt-BR',
+          {
+            style: 'currency',
+            currency: 'USD',
+          },
+        ),
+        changePct:
+          `${quote.changePct >= 0 ? '+' : ''}${quote.changePct.toFixed(2)}%`,
+        updatedAt: formatDateTime(
+          quote.updatedAt,
+        ),
+      });
+    } catch (error) {
+      setFinnhubResult({
+        state: 'ERROR',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Não foi possível consultar a Finnhub.',
+      });
+    }
+  }
   
 
   return (
@@ -442,6 +506,124 @@ async function testConnection() {
               )}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="card animate-fade-up p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {finnhubResult.state ===
+            'SUCCESS' ? (
+              <Wifi className="h-4 w-4 text-bull-400" />
+            ) : finnhubResult.state ===
+              'ERROR' ? (
+              <WifiOff className="h-4 w-4 text-bear-400" />
+            ) : (
+              <Radio className="h-4 w-4 text-accent-400" />
+            )}
+
+            <div>
+              <h3 className="text-sm font-bold text-white">
+                Teste real da Finnhub
+              </h3>
+
+              <p className="mt-0.5 text-[11px] text-slate-600">
+                Consulta a ação AAPL pela função segura da Vercel.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              void testFinnhub()
+            }
+            disabled={
+              finnhubResult.state ===
+              'TESTING'
+            }
+            className="flex items-center gap-1.5 rounded-lg bg-accent-500 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-accent-400 disabled:opacity-50"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${
+                finnhubResult.state ===
+                'TESTING'
+                  ? 'animate-spin'
+                  : ''
+              }`}
+            />
+
+            Testar Finnhub
+          </button>
+        </div>
+
+        <div
+          className={`mt-4 rounded-xl border p-3 ${
+            finnhubResult.state ===
+            'SUCCESS'
+              ? 'border-bull-500/20 bg-bull-500/5'
+              : finnhubResult.state ===
+                  'ERROR'
+                ? 'border-bear-500/20 bg-bear-500/5'
+                : 'border-white/[0.06] bg-ink-800/50'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            {finnhubResult.state ===
+            'SUCCESS' ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-bull-400" />
+            ) : finnhubResult.state ===
+              'ERROR' ? (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-bear-400" />
+            ) : (
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+            )}
+
+            <div className="min-w-0 flex-1">
+              <p className="text-xs leading-relaxed text-slate-300">
+                {finnhubResult.message}
+              </p>
+
+              {finnhubResult.price && (
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Tile
+                    label="Ativo real"
+                    value={
+                      finnhubResult.symbol ??
+                      'AAPL'
+                    }
+                  />
+
+                  <Tile
+                    label="Preço"
+                    value={
+                      finnhubResult.price
+                    }
+                  />
+
+                  <Tile
+                    label="Variação"
+                    value={
+                      finnhubResult.changePct ??
+                      '—'
+                    }
+                  />
+
+                  <Tile
+                    label="Atualizado"
+                    value={
+                      finnhubResult.updatedAt ??
+                      '—'
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3 text-[11px] leading-relaxed text-yellow-200/80">
+          Este teste usa uma ação americana real apenas para validar a integração. Ele não representa WIN ou WDO e não libera ordens reais.
         </div>
       </section>
 
