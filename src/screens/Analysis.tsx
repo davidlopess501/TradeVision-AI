@@ -18,6 +18,11 @@ import {
 } from '@/services/orderManager';
 
 import {
+  DEFAULT_RISK_RULES,
+  evaluateOrderRisk,
+} from '@/services/riskManager';
+
+import {
   connectBroker,
   getBrokerAccount,
   getBrokerStatus,
@@ -31,8 +36,15 @@ import type {
   BrokerStatus,
 } from '@/services/brokerConnector';
 
+import {
+  addDemoOrderHistory,
+  clearDemoOrderHistory,
+  getDemoOrderHistory,
+  type DemoOrderHistoryItem,
+} from '@/services/demoOrderHistory';
+
 import { useStore } from '@/store';
-import { formatMoney, formatPrice } from '@/lib/assets';
+import { formatPrice } from '@/lib/assets';
 import { analyzeFibonacci } from '@/lib/fibonacci';
 
 import {
@@ -49,16 +61,7 @@ import {
   buildInstitutionalNarrative,
 } from '@/lib/institutionalNarrative';
 
-import {
-  CheckCircle2,
-  Link2,
-  Loader2,
-  RefreshCw,
-  Send,
-  ShieldCheck,
-  WalletCards,
-  XCircle,
-} from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 import { ScoreGauge } from '@/components/ui/ScoreGauge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
@@ -72,6 +75,20 @@ import { SmartMoneyPanel } from '@/components/analysis/SmartMoneyPanel';
 import { FibonacciPanel } from '@/components/analysis/FibonacciPanel';
 import { MultiTimeframePanel } from '@/components/analysis/MultiTimeframePanel';
 import { InstitutionalPanel } from '@/components/analysis/InstitutionalPanel';
+import {
+  DecisionEnginePanel,
+} from '@/components/analysis/DecisionEnginePanel';
+import {
+  BrokerPanel,
+} from '@/components/analysis/BrokerPanel';
+
+import {
+  DemoOrderHistoryPanel,
+} from '@/components/analysis/DemoOrderHistoryPanel';
+
+import {
+  RiskManagerPanel,
+} from '@/components/analysis/RiskManagerPanel';
 
 interface AnalysisScreenProps {
   initialAsset: Asset;
@@ -149,6 +166,11 @@ export default function AnalysisScreen({
   const [lastBrokerOrder, setLastBrokerOrder] =
     useState<BrokerOrderResponse | null>(null);
 
+  const [demoOrderHistory, setDemoOrderHistory] =
+    useState<DemoOrderHistoryItem[]>(
+      () => getDemoOrderHistory(),
+    );
+
   const fibonacciAnalysis = useMemo(
     () => analyzeFibonacci(candles),
     [candles],
@@ -196,6 +218,21 @@ export default function AnalysisScreen({
       decision,
     );
   }, [result, decision]);
+
+  const riskEvaluation = useMemo(() => {
+    if (!preparedOrder) {
+      return null;
+    }
+
+    return evaluateOrderRisk(
+      preparedOrder,
+      DEFAULT_RISK_RULES,
+      {
+        dailyPnl: 0,
+        openPositions: 0,
+      },
+    );
+  }, [preparedOrder]);
 
   async function run() {
     setLoading(true);
@@ -343,6 +380,20 @@ export default function AnalysisScreen({
       return;
     }
 
+    if (
+      !riskEvaluation ||
+      riskEvaluation.decision !== 'APPROVED' ||
+      riskEvaluation.quantity < 1
+    ) {
+      setBrokerFeedback({
+        tone: 'error',
+        message:
+          riskEvaluation?.reason ??
+          'A ordem não foi aprovada pelo Risk Manager.',
+      });
+      return;
+    }
+
     setBrokerActionState('SENDING');
 
     try {
@@ -359,24 +410,38 @@ export default function AnalysisScreen({
         return;
       }
 
+      const request = {
+        clientOrderId:
+          preparedOrder.id,
+        asset:
+          preparedOrder.asset,
+        side:
+          preparedOrder.side,
+        quantity: riskEvaluation.quantity,
+        entry:
+          preparedOrder.entry,
+        stop:
+          preparedOrder.stop,
+        target:
+          preparedOrder.target,
+      };
+
       const response =
-        await sendBrokerOrder({
-          clientOrderId:
-            preparedOrder.id,
-          asset:
-            preparedOrder.asset,
-          side:
-            preparedOrder.side,
-          quantity: 1,
-          entry:
-            preparedOrder.entry,
-          stop:
-            preparedOrder.stop,
-          target:
-            preparedOrder.target,
-        });
+        await sendBrokerOrder(request);
 
       setLastBrokerOrder(response);
+
+      if (response.status === 'ACCEPTED') {
+        addDemoOrderHistory(
+          request,
+          response,
+        );
+
+        setDemoOrderHistory(
+          getDemoOrderHistory(),
+        );
+      }
+
       setBrokerFeedback({
         tone:
           response.status === 'ACCEPTED'
@@ -395,6 +460,11 @@ export default function AnalysisScreen({
     } finally {
       setBrokerActionState('IDLE');
     }
+  }
+
+  function handleClearDemoHistory() {
+    clearDemoOrderHistory();
+    setDemoOrderHistory([]);
   }
 
   useEffect(() => {
@@ -577,293 +647,42 @@ export default function AnalysisScreen({
             onRefresh={() => void run()}
           />
 
-          {decision && (
-            <section className="card animate-fade-up p-4">
-              <h3 className="text-sm font-bold text-white">
-                Decision Engine
-              </h3>
+          {decision && preparedOrder && (
+            <DecisionEnginePanel
+              asset={asset}
+              decision={decision}
+              preparedOrder={preparedOrder}
+            />
+          )}
 
-              <div className="mt-3 grid grid-cols-3 gap-3">
-                <MiniStat
-                  label="Ação"
-                  value={decision.action}
-                  tone={
-                    decision.action === 'BUY'
-                      ? 'bull'
-                      : decision.action === 'SELL'
-                        ? 'bear'
-                        : 'wait'
-                  }
-                />
-
-                <MiniStat
-                  label="Confiança"
-                  value={`${decision.confidence}%`}
-                />
-
-                <MiniStat
-                  label="Status"
-                  value="Motor ativo"
-                />
-              </div>
-
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">
-                {decision.reason}
-              </p>
-            </section>
+          {riskEvaluation && (
+            <RiskManagerPanel
+              evaluation={riskEvaluation}
+              rules={DEFAULT_RISK_RULES}
+            />
           )}
 
           {preparedOrder && (
-            <section className="card animate-fade-up p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    Order Manager
-                  </h3>
-
-                  <p className="mt-0.5 text-[11px] text-slate-600">
-                    Preparação e validação da ordem
-                  </p>
-                </div>
-
-                <span
-                  className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
-                    preparedOrder.status === 'READY'
-                      ? 'bg-bull-500/10 text-bull-400'
-                      : 'bg-wait-500/10 text-wait-400'
-                  }`}
-                >
-                  {preparedOrder.status === 'READY'
-                    ? 'ORDEM PRONTA'
-                    : 'ORDEM BLOQUEADA'}
-                </span>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <MiniStat
-                  label="Lado"
-                  value={
-                    preparedOrder.side ??
-                    'AGUARDAR'
-                  }
-                  tone={
-                    preparedOrder.side === 'BUY'
-                      ? 'bull'
-                      : preparedOrder.side === 'SELL'
-                        ? 'bear'
-                        : 'wait'
-                  }
-                />
-
-                <MiniStat
-                  label="Entrada"
-                  value={formatPrice(
-                    asset,
-                    preparedOrder.entry,
-                  )}
-                />
-
-                <MiniStat
-                  label="Stop"
-                  value={formatPrice(
-                    asset,
-                    preparedOrder.stop,
-                  )}
-                  tone="bear"
-                />
-
-                <MiniStat
-                  label="Alvo"
-                  value={formatPrice(
-                    asset,
-                    preparedOrder.target,
-                  )}
-                  tone="bull"
-                />
-              </div>
-
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <MiniStat
-                  label="Confiança"
-                  value={`${preparedOrder.confidence}%`}
-                />
-
-                <MiniStat
-                  label="Envio"
-                  value="Não enviado"
-                  tone="wait"
-                />
-              </div>
-
-              <p className="mt-3 text-xs leading-relaxed text-slate-400">
-                {preparedOrder.reason}
-              </p>
-            </section>
+            <BrokerPanel
+              preparedOrder={preparedOrder}
+              brokerStatus={brokerStatus}
+              brokerAccount={brokerAccount}
+              brokerActionState={brokerActionState}
+              brokerFeedback={brokerFeedback}
+              lastBrokerOrder={lastBrokerOrder}
+              riskApproved={
+                riskEvaluation?.decision === 'APPROVED'
+              }
+              onConnect={handleConnectBroker}
+              onValidate={handleValidateOrder}
+              onSend={handleSendDemoOrder}
+            />
           )}
 
-          {preparedOrder && (
-            <section className="card animate-fade-up p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <WalletCards className="h-4 w-4 text-accent-400" />
-
-                  <div>
-                    <h3 className="text-sm font-bold text-white">
-                      Conta Demo
-                    </h3>
-
-                    <p className="mt-0.5 text-[11px] text-slate-600">
-                      Simulação segura do Broker Connector
-                    </p>
-                  </div>
-                </div>
-
-                <span
-                  className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
-                    brokerStatus.connectionStatus === 'CONNECTED'
-                      ? 'bg-bull-500/10 text-bull-400'
-                      : 'bg-wait-500/10 text-wait-400'
-                  }`}
-                >
-                  {brokerStatus.connectionStatus === 'CONNECTED'
-                    ? 'CONECTADA'
-                    : 'DESCONECTADA'}
-                </span>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <MiniStat
-                  label="Ambiente"
-                  value={brokerStatus.environment}
-                  tone="wait"
-                />
-
-                <MiniStat
-                  label="Corretora"
-                  value={brokerStatus.name}
-                />
-
-                <MiniStat
-                  label="Saldo"
-                  value={
-                    brokerAccount
-                      ? formatMoney(
-                          brokerAccount.balance,
-                        )
-                      : '—'
-                  }
-                />
-
-                <MiniStat
-                  label="Margem"
-                  value={
-                    brokerAccount
-                      ? formatMoney(
-                          brokerAccount.availableMargin,
-                        )
-                      : '—'
-                  }
-                />
-              </div>
-
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleConnectBroker()
-                  }
-                  disabled={
-                    brokerActionState !== 'IDLE' ||
-                    brokerStatus.connectionStatus === 'CONNECTED'
-                  }
-                  className="flex items-center justify-center gap-2 rounded-lg bg-accent-500 px-3 py-2.5 text-xs font-bold text-white transition-colors hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {brokerActionState === 'CONNECTING' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Link2 className="h-4 w-4" />
-                  )}
-
-                  Conectar demo
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleValidateOrder()
-                  }
-                  disabled={
-                    brokerActionState !== 'IDLE' ||
-                    brokerStatus.connectionStatus !== 'CONNECTED'
-                  }
-                  className="flex items-center justify-center gap-2 rounded-lg bg-ink-800 px-3 py-2.5 text-xs font-bold text-slate-200 transition-colors hover:bg-ink-750 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {brokerActionState === 'VALIDATING' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="h-4 w-4" />
-                  )}
-
-                  Validar ordem
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleSendDemoOrder()
-                  }
-                  disabled={
-                    brokerActionState !== 'IDLE' ||
-                    brokerStatus.connectionStatus !== 'CONNECTED' ||
-                    preparedOrder.status !== 'READY'
-                  }
-                  className="flex items-center justify-center gap-2 rounded-lg bg-bull-500/15 px-3 py-2.5 text-xs font-bold text-bull-400 transition-colors hover:bg-bull-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {brokerActionState === 'SENDING' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-
-                  Enviar ordem demo
-                </button>
-              </div>
-
-              <div
-                className={`mt-4 flex items-start gap-2 rounded-xl border p-3 ${
-                  brokerFeedback.tone === 'success'
-                    ? 'border-bull-500/20 bg-bull-500/5'
-                    : brokerFeedback.tone === 'error'
-                      ? 'border-bear-500/20 bg-bear-500/5'
-                      : 'border-white/[0.06] bg-ink-800/50'
-                }`}
-              >
-                {brokerFeedback.tone === 'success' ? (
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-bull-400" />
-                ) : brokerFeedback.tone === 'error' ? (
-                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-bear-400" />
-                ) : (
-                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
-                )}
-
-                <div>
-                  <p className="text-xs leading-relaxed text-slate-300">
-                    {brokerFeedback.message}
-                  </p>
-
-                  {lastBrokerOrder?.brokerOrderId && (
-                    <p className="mt-1 font-mono text-[10px] text-slate-600">
-                      ID demo: {lastBrokerOrder.brokerOrderId}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
-                Este ambiente é exclusivamente demonstrativo. Nenhuma ordem é enviada a uma corretora real.
-              </p>
-            </section>
-          )}
+          <DemoOrderHistoryPanel
+            history={demoOrderHistory}
+            onClear={handleClearDemoHistory}
+          />
 
           <SignalPanel
             asset={asset}
