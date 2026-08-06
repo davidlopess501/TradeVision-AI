@@ -19,6 +19,9 @@ import {
   analyzeInstitutionalAI,
   type InstitutionalAnalysis,
 } from '@/lib/institutionalAI';
+import {
+  buildInstitutionalNarrative,
+} from '@/lib/institutionalNarrative';
 
 import { RefreshCw } from 'lucide-react';
 
@@ -83,6 +86,30 @@ export default function AnalysisScreen({
     () => analyzeFibonacci(candles),
     [candles],
   );
+
+  const institutionalNarrative = useMemo(() => {
+    if (
+      !result ||
+      !institutionalAnalysis ||
+      candles.length === 0
+    ) {
+      return null;
+    }
+
+    return buildInstitutionalNarrative({
+      asset,
+      result,
+      candles,
+      institutional: institutionalAnalysis,
+      multiTimeframe,
+    });
+  }, [
+    asset,
+    result,
+    candles,
+    institutionalAnalysis,
+    multiTimeframe,
+  ]);
 
   async function run() {
     setLoading(true);
@@ -247,11 +274,13 @@ export default function AnalysisScreen({
             }
           />
 
-          {institutionalAnalysis && (
-            <InstitutionalPanel
-              analysis={institutionalAnalysis}
-            />
-          )}
+          {institutionalAnalysis &&
+            institutionalNarrative && (
+              <InstitutionalPanel
+                analysis={institutionalAnalysis}
+                narrative={institutionalNarrative}
+              />
+            )}
 
           <section className="card animate-fade-up p-4 sm:p-5">
             <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-between">

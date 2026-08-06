@@ -4,6 +4,10 @@ import type {
   InstitutionalRisk,
 } from '@/lib/institutionalAI';
 
+import type {
+  InstitutionalNarrative,
+} from '@/lib/institutionalNarrative';
+
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -12,10 +16,16 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldX,
+  Target,
+  AlertTriangle,
+  CheckCircle2,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 
 interface InstitutionalPanelProps {
   analysis: InstitutionalAnalysis;
+  narrative: InstitutionalNarrative;
 }
 
 function decisionLabel(
@@ -56,6 +66,7 @@ function riskLabel(
 
 export function InstitutionalPanel({
   analysis,
+  narrative,
 }: InstitutionalPanelProps) {
   const decisionConfig =
     analysis.signal === 'BUY'
@@ -178,6 +189,162 @@ export function InstitutionalPanel({
         </div>
       </div>
 
+      <div className="mt-4 rounded-xl border border-white/[0.06] bg-ink-850/70 p-4">
+        <div className="flex items-center gap-2">
+          <Brain className="h-4 w-4 text-accent-400" />
+
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+            Leitura institucional
+          </h4>
+        </div>
+
+        <div className="mt-3 text-base font-extrabold text-white">
+          {narrative.title}
+        </div>
+
+        <p className="mt-2 text-sm leading-relaxed text-slate-300">
+          {narrative.marketReading}
+        </p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <PlanCard
+          label="Entrada"
+          value={narrative.entry}
+        />
+
+        <PlanCard
+          label="Stop"
+          value={narrative.stop}
+          tone="bear"
+        />
+
+        <PlanCard
+          label="Alvo"
+          value={narrative.target}
+          tone="bull"
+        />
+
+        <PlanCard
+          label="Risco/Retorno"
+          value={narrative.riskReward}
+        />
+      </div>
+
+      <div className="mt-4 rounded-xl bg-ink-800/50 p-4">
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-accent-400" />
+
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+            Plano operacional
+          </h4>
+        </div>
+
+        <p className="mt-2 text-sm leading-relaxed text-slate-300">
+          {narrative.operationalPlan}
+        </p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="rounded-xl bg-bull-500/10 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-bull-400" />
+              <span className="text-xs font-bold text-bull-400">
+                Compra
+              </span>
+            </div>
+
+            <span className="font-mono text-lg font-extrabold text-bull-400">
+              {narrative.buyProbability}%
+            </span>
+          </div>
+
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-ink-900">
+            <div
+              className="h-full rounded-full bg-bull-500 transition-all"
+              style={{
+                width: `${narrative.buyProbability}%`,
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-bear-500/10 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingDown className="h-4 w-4 text-bear-400" />
+              <span className="text-xs font-bold text-bear-400">
+                Venda
+              </span>
+            </div>
+
+            <span className="font-mono text-lg font-extrabold text-bear-400">
+              {narrative.sellProbability}%
+            </span>
+          </div>
+
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-ink-900">
+            <div
+              className="h-full rounded-full bg-bear-500 transition-all"
+              style={{
+                width: `${narrative.sellProbability}%`,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-xl border border-bull-500/15 bg-bull-500/5 p-4">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-bull-400" />
+
+            <h4 className="text-xs font-bold uppercase tracking-wider text-bull-400">
+              Confirmações
+            </h4>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {narrative.confirmations.length > 0 ? (
+              narrative.confirmations.map((confirmation) => (
+                <p
+                  key={confirmation}
+                  className="text-xs leading-relaxed text-slate-300"
+                >
+                  • {confirmation}
+                </p>
+              ))
+            ) : (
+              <p className="text-xs text-slate-500">
+                Nenhuma confirmação dominante foi identificada.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-yellow-500/15 bg-yellow-500/5 p-4">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-yellow-400" />
+
+            <h4 className="text-xs font-bold uppercase tracking-wider text-yellow-400">
+              Alertas
+            </h4>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {narrative.warnings.map((warning) => (
+              <p
+                key={warning}
+                className="text-xs leading-relaxed text-slate-300"
+              >
+                • {warning}
+              </p>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="mt-4 grid grid-cols-3 gap-2">
         <MiniStat
           label="Positivos"
@@ -278,6 +445,36 @@ function MiniStat({
               : tone === 'wait'
                 ? 'text-wait-400'
                 : 'text-slate-200'
+        }`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function PlanCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'bull' | 'bear';
+}) {
+  return (
+    <div className="rounded-xl bg-ink-800/60 p-3 text-center">
+      <div className="text-[9px] font-semibold uppercase tracking-wider text-slate-600">
+        {label}
+      </div>
+
+      <div
+        className={`mt-1 font-mono text-sm font-bold ${
+          tone === 'bull'
+            ? 'text-bull-400'
+            : tone === 'bear'
+              ? 'text-bear-400'
+              : 'text-white'
         }`}
       >
         {value}
