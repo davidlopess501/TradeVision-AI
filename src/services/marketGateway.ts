@@ -5,10 +5,14 @@ import type {
 
 import {
   getMarketDataMode,
-  getMarketDataProvider,
   getMarketDataStatus,
   type MarketDataMode,
 } from './types';
+
+import {
+  getActiveMarketProvider,
+  getProviderManagerStatus,
+} from './providerManager';
 
 import {
   getProviderSymbol,
@@ -36,6 +40,7 @@ export interface MarketGatewayStatus {
   providerName: string;
   connected: boolean;
   realTradingEnabled: boolean;
+  realProviderAvailable: boolean;
 }
 
 export interface GatewayTestResult {
@@ -107,16 +112,22 @@ function validateFinnhubQuote(
 
 export function getMarketGatewayStatus():
   MarketGatewayStatus {
-  const status =
+  const marketStatus =
     getMarketDataStatus();
+
+  const managerStatus =
+    getProviderManagerStatus();
 
   return {
     mode: getMarketDataMode(),
     providerName:
-      status.providerName,
-    connected: status.connected,
+      managerStatus.providerName,
+    connected:
+      marketStatus.connected,
     realTradingEnabled:
-      status.realTradingEnabled,
+      marketStatus.realTradingEnabled,
+    realProviderAvailable:
+      managerStatus.realProviderAvailable,
   };
 }
 
@@ -124,7 +135,7 @@ export async function getActiveQuote(
   asset: Asset,
 ): Promise<Quote> {
   const provider =
-    getMarketDataProvider();
+    getActiveMarketProvider();
 
   return provider.getQuote(asset);
 }
@@ -134,7 +145,7 @@ export async function testActiveProvider(
 ): Promise<GatewayTestResult> {
   try {
     const provider =
-      getMarketDataProvider();
+      getActiveMarketProvider();
 
     const providerSymbol =
       getProviderSymbol(
