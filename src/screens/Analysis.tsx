@@ -17,8 +17,22 @@ import {
   prepareOrder,
 } from '@/services/orderManager';
 
+import {
+  connectBroker,
+  getBrokerAccount,
+  getBrokerStatus,
+  sendBrokerOrder,
+  validateBrokerOrder,
+} from '@/services/brokerManager';
+
+import type {
+  BrokerAccount,
+  BrokerOrderResponse,
+  BrokerStatus,
+} from '@/services/brokerConnector';
+
 import { useStore } from '@/store';
-import { formatPrice } from '@/lib/assets';
+import { formatMoney, formatPrice } from '@/lib/assets';
 import { analyzeFibonacci } from '@/lib/fibonacci';
 
 import {
@@ -35,7 +49,16 @@ import {
   buildInstitutionalNarrative,
 } from '@/lib/institutionalNarrative';
 
-import { RefreshCw } from 'lucide-react';
+import {
+  CheckCircle2,
+  Link2,
+  Loader2,
+  RefreshCw,
+  Send,
+  ShieldCheck,
+  WalletCards,
+  XCircle,
+} from 'lucide-react';
 
 import { ScoreGauge } from '@/components/ui/ScoreGauge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
@@ -54,6 +77,17 @@ interface AnalysisScreenProps {
   initialAsset: Asset;
   onGoToAI: (asset: Asset) => void;
   onGoToEngine: (asset: Asset) => void;
+}
+
+type BrokerActionState =
+  | 'IDLE'
+  | 'CONNECTING'
+  | 'VALIDATING'
+  | 'SENDING';
+
+interface BrokerFeedback {
+  tone: 'neutral' | 'success' | 'error';
+  message: string;
 }
 
 export default function AnalysisScreen({
@@ -93,6 +127,27 @@ export default function AnalysisScreen({
 
   const [institutionalAnalysis, setInstitutionalAnalysis] =
     useState<InstitutionalAnalysis | null>(null);
+
+  const [brokerStatus, setBrokerStatus] =
+    useState<BrokerStatus>(
+      getBrokerStatus(),
+    );
+
+  const [brokerAccount, setBrokerAccount] =
+    useState<BrokerAccount | null>(null);
+
+  const [brokerActionState, setBrokerActionState] =
+    useState<BrokerActionState>('IDLE');
+
+  const [brokerFeedback, setBrokerFeedback] =
+    useState<BrokerFeedback>({
+      tone: 'neutral',
+      message:
+        'Conecte a conta demo para validar e simular o envio da ordem.',
+    });
+
+  const [lastBrokerOrder, setLastBrokerOrder] =
+    useState<BrokerOrderResponse | null>(null);
 
   const fibonacciAnalysis = useMemo(
     () => analyzeFibonacci(candles),
@@ -163,6 +218,12 @@ export default function AnalysisScreen({
       setResult(nextResult);
       setCandles(nextCandles);
       addHistory(nextResult);
+      setLastBrokerOrder(null);
+      setBrokerFeedback({
+        tone: 'neutral',
+        message:
+          'Nova análise concluída. Valide novamente a ordem antes de simular o envio.',
+      });
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -191,6 +252,148 @@ export default function AnalysisScreen({
       );
     } finally {
       setMultiTimeframeLoading(false);
+    }
+  }
+
+  async function handleConnectBroker() {
+    setBrokerActionState('CONNECTING');
+    setBrokerFeedback({
+      tone: 'neutral',
+      message:
+        'Conectando à conta demo...',
+    });
+
+    try {
+      const nextStatus =
+        await connectBroker();
+
+      const nextAccount =
+        await getBrokerAccount();
+
+      setBrokerStatus(nextStatus);
+      setBrokerAccount(nextAccount);
+      setBrokerFeedback({
+        tone:
+          nextStatus.connectionStatus === 'CONNECTED'
+            ? 'success'
+            : 'error',
+        message: nextStatus.message,
+      });
+    } catch (caughtError) {
+      setBrokerFeedback({
+        tone: 'error',
+        message:
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'Não foi possível conectar à conta demo.',
+      });
+    } finally {
+      setBrokerActionState('IDLE');
+    }
+  }
+
+  async function handleValidateOrder() {
+    if (!preparedOrder) {
+      setBrokerFeedback({
+        tone: 'error',
+        message:
+          'Nenhuma ordem foi preparada.',
+      });
+      return;
+    }
+
+    setBrokerActionState('VALIDATING');
+
+    try {
+      const validation =
+        await validateBrokerOrder(
+          preparedOrder,
+        );
+
+      setBrokerFeedback({
+        tone: validation.valid
+          ? 'success'
+          : 'error',
+        message: validation.message,
+      });
+    } catch (caughtError) {
+      setBrokerFeedback({
+        tone: 'error',
+        message:
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'Não foi possível validar a ordem.',
+      });
+    } finally {
+      setBrokerActionState('IDLE');
+    }
+  }
+
+  async function handleSendDemoOrder() {
+    if (
+      !preparedOrder ||
+      preparedOrder.status !== 'READY' ||
+      !preparedOrder.side
+    ) {
+      setBrokerFeedback({
+        tone: 'error',
+        message:
+          'A ordem está bloqueada e não pode ser enviada.',
+      });
+      return;
+    }
+
+    setBrokerActionState('SENDING');
+
+    try {
+      const validation =
+        await validateBrokerOrder(
+          preparedOrder,
+        );
+
+      if (!validation.valid) {
+        setBrokerFeedback({
+          tone: 'error',
+          message: validation.message,
+        });
+        return;
+      }
+
+      const response =
+        await sendBrokerOrder({
+          clientOrderId:
+            preparedOrder.id,
+          asset:
+            preparedOrder.asset,
+          side:
+            preparedOrder.side,
+          quantity: 1,
+          entry:
+            preparedOrder.entry,
+          stop:
+            preparedOrder.stop,
+          target:
+            preparedOrder.target,
+        });
+
+      setLastBrokerOrder(response);
+      setBrokerFeedback({
+        tone:
+          response.status === 'ACCEPTED'
+            ? 'success'
+            : 'error',
+        message: response.message,
+      });
+    } catch (caughtError) {
+      setBrokerFeedback({
+        tone: 'error',
+        message:
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'Não foi possível enviar a ordem demo.',
+      });
+    } finally {
+      setBrokerActionState('IDLE');
     }
   }
 
@@ -498,6 +701,170 @@ export default function AnalysisScreen({
             </section>
           )}
 
+          {preparedOrder && (
+            <section className="card animate-fade-up p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <WalletCards className="h-4 w-4 text-accent-400" />
+
+                  <div>
+                    <h3 className="text-sm font-bold text-white">
+                      Conta Demo
+                    </h3>
+
+                    <p className="mt-0.5 text-[11px] text-slate-600">
+                      Simulação segura do Broker Connector
+                    </p>
+                  </div>
+                </div>
+
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                    brokerStatus.connectionStatus === 'CONNECTED'
+                      ? 'bg-bull-500/10 text-bull-400'
+                      : 'bg-wait-500/10 text-wait-400'
+                  }`}
+                >
+                  {brokerStatus.connectionStatus === 'CONNECTED'
+                    ? 'CONECTADA'
+                    : 'DESCONECTADA'}
+                </span>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <MiniStat
+                  label="Ambiente"
+                  value={brokerStatus.environment}
+                  tone="wait"
+                />
+
+                <MiniStat
+                  label="Corretora"
+                  value={brokerStatus.name}
+                />
+
+                <MiniStat
+                  label="Saldo"
+                  value={
+                    brokerAccount
+                      ? formatMoney(
+                          brokerAccount.balance,
+                        )
+                      : '—'
+                  }
+                />
+
+                <MiniStat
+                  label="Margem"
+                  value={
+                    brokerAccount
+                      ? formatMoney(
+                          brokerAccount.availableMargin,
+                        )
+                      : '—'
+                  }
+                />
+              </div>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleConnectBroker()
+                  }
+                  disabled={
+                    brokerActionState !== 'IDLE' ||
+                    brokerStatus.connectionStatus === 'CONNECTED'
+                  }
+                  className="flex items-center justify-center gap-2 rounded-lg bg-accent-500 px-3 py-2.5 text-xs font-bold text-white transition-colors hover:bg-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {brokerActionState === 'CONNECTING' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Link2 className="h-4 w-4" />
+                  )}
+
+                  Conectar demo
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleValidateOrder()
+                  }
+                  disabled={
+                    brokerActionState !== 'IDLE' ||
+                    brokerStatus.connectionStatus !== 'CONNECTED'
+                  }
+                  className="flex items-center justify-center gap-2 rounded-lg bg-ink-800 px-3 py-2.5 text-xs font-bold text-slate-200 transition-colors hover:bg-ink-750 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {brokerActionState === 'VALIDATING' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-4 w-4" />
+                  )}
+
+                  Validar ordem
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleSendDemoOrder()
+                  }
+                  disabled={
+                    brokerActionState !== 'IDLE' ||
+                    brokerStatus.connectionStatus !== 'CONNECTED' ||
+                    preparedOrder.status !== 'READY'
+                  }
+                  className="flex items-center justify-center gap-2 rounded-lg bg-bull-500/15 px-3 py-2.5 text-xs font-bold text-bull-400 transition-colors hover:bg-bull-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {brokerActionState === 'SENDING' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+
+                  Enviar ordem demo
+                </button>
+              </div>
+
+              <div
+                className={`mt-4 flex items-start gap-2 rounded-xl border p-3 ${
+                  brokerFeedback.tone === 'success'
+                    ? 'border-bull-500/20 bg-bull-500/5'
+                    : brokerFeedback.tone === 'error'
+                      ? 'border-bear-500/20 bg-bear-500/5'
+                      : 'border-white/[0.06] bg-ink-800/50'
+                }`}
+              >
+                {brokerFeedback.tone === 'success' ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-bull-400" />
+                ) : brokerFeedback.tone === 'error' ? (
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-bear-400" />
+                ) : (
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                )}
+
+                <div>
+                  <p className="text-xs leading-relaxed text-slate-300">
+                    {brokerFeedback.message}
+                  </p>
+
+                  {lastBrokerOrder?.brokerOrderId && (
+                    <p className="mt-1 font-mono text-[10px] text-slate-600">
+                      ID demo: {lastBrokerOrder.brokerOrderId}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
+                Este ambiente é exclusivamente demonstrativo. Nenhuma ordem é enviada a uma corretora real.
+              </p>
+            </section>
+          )}
+
           <SignalPanel
             asset={asset}
             result={result}
@@ -526,7 +893,7 @@ function MiniStat({
       </div>
 
       <div
-        className={`mt-0.5 font-mono text-xs font-bold tabular ${
+        className={`mt-0.5 truncate font-mono text-xs font-bold tabular ${
           tone === 'bull'
             ? 'text-bull-400'
             : tone === 'bear'
