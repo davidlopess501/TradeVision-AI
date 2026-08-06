@@ -1,44 +1,12 @@
-import {
-  setRealMarketDataProvider,
-} from './types';
-
-import {
-  RealMarketDataProvider,
-} from './realProvider';
-
-export function registerRealMarketDataProvider():
-  boolean {
-  const baseUrl =
-    import.meta.env
-      .VITE_MARKET_API_URL?.trim();
-
-  if (!baseUrl) {
-    return false;
-  }
-
-  const token =
-    import.meta.env
-      .VITE_MARKET_API_TOKEN?.trim();
-
-  const pollingValue =
-    Number(
-      import.meta.env
-        .VITE_MARKET_QUOTE_POLLING_MS,
-    );
-
-  const quotePollingMs =
-    Number.isFinite(pollingValue) &&
-    pollingValue >= 1000
-      ? pollingValue
-      : 3000;
-
-  setRealMarketDataProvider(
-    new RealMarketDataProvider({
-      baseUrl,
-      token,
-      quotePollingMs,
-    }),
-  );
-
-  return true;
+/**
+ * O provedor real ainda não é registrado automaticamente.
+ *
+ * A função segura da Finnhub já funciona em /api/quote,
+ * mas ela será usada apenas para testar a conexão com AAPL.
+ *
+ * WIN e WDO continuam em modo Simulado/Demo até conectarmos
+ * um provedor compatível com os contratos da B3.
+ */
+export function registerRealMarketDataProvider(): boolean {
+  return false;
 }

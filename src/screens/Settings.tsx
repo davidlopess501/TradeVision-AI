@@ -11,12 +11,15 @@ import {
 
 import {
   getMarketDataMode,
-  getMarketDataProvider,
   getMarketDataStatus,
   hasRealMarketDataProvider,
   setMarketDataMode,
   type MarketDataMode,
 } from '@/services/types';
+
+import {
+  testActiveProvider,
+} from '@/services/marketGateway';
 
 import {
   Settings as Cog,
@@ -35,7 +38,9 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 
-import type { TabId } from '@/components/BottomNav';
+import type {
+  TabId,
+} from '@/components/BottomNav';
 
 interface SettingsProps {
   onNavigate: (tab: TabId) => void;
@@ -160,43 +165,41 @@ export default function Settings({
     }
   }
 
-  async function testConnection() {
-    setConnectionResult({
-      state: 'TESTING',
-      message:
-        'Consultando o provedor ativo...',
-    });
+async function testConnection() {
+  setConnectionResult({
+    state: 'TESTING',
+    message: 'Consultando o Market Gateway...',
+  });
 
-    try {
-      const provider =
-        getMarketDataProvider();
+  try {
+    const result = await testActiveProvider('WIN');
 
-      const quote =
-        await provider.getQuote('WIN');
-
-      setConnectionResult({
-        state: 'SUCCESS',
-        message:
-          `Conexão concluída com ${provider.name}.`,
-        price: formatPrice(
-          'WIN',
-          quote.price,
-        ),
-        updatedAt:
-          formatDateTime(
-            quote.updatedAt,
-          ),
-      });
-    } catch (error) {
-      setConnectionResult({
-        state: 'ERROR',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'Não foi possível consultar o provedor.',
-      });
+    if (!result.success || !result.quote) {
+      throw new Error(result.message);
     }
+
+    setConnectionResult({
+      state: 'SUCCESS',
+      message: result.message,
+      price: formatPrice(
+        'WIN',
+        result.quote.price,
+      ),
+      updatedAt: formatDateTime(
+        result.quote.updatedAt,
+      ),
+    });
+  } catch (error) {
+    setConnectionResult({
+      state: 'ERROR',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível consultar o Market Gateway.',
+    });
   }
+}
+  
 
   return (
     <div className="space-y-5">
