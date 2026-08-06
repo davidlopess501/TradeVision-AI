@@ -10,6 +10,10 @@ import {
   type MarketDataMode,
 } from './types';
 
+import {
+  getProviderSymbol,
+} from './symbolMapper';
+
 export type MarketGatewaySource =
   | 'ACTIVE_PROVIDER'
   | 'FINNHUB_TEST';
@@ -132,8 +136,16 @@ export async function testActiveProvider(
     const provider =
       getMarketDataProvider();
 
+    const providerSymbol =
+      getProviderSymbol(
+        asset,
+        'SIMULATED',
+      );
+
     const quote =
-      await provider.getQuote(asset);
+      await provider.getQuote(
+        providerSymbol as Asset,
+      );
 
     return {
       success: true,
