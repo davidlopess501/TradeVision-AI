@@ -23,8 +23,8 @@ import {
 } from '@/services/riskManager';
 
 import {
-  runStrategyBacktest,
-} from '@/services/backtestRunner';
+  runBacktestV2,
+} from '@/services/backtestV2Runner';
 
 import type {
   BacktestResult,
@@ -490,11 +490,10 @@ export default function AnalysisScreen({
 
     try {
       const nextResult =
-        await runStrategyBacktest({
+        await runBacktestV2({
           asset,
           timeframe,
           initialCapital: 10000,
-          quantity: 1,
           candles,
         });
 
