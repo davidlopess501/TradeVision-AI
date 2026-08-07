@@ -463,12 +463,24 @@ export function finalizeAnalysis(
     (indicator) => indicator.key === 'ema21',
   );
 
+  const ema9Strength =
+    ema9?.strength ?? 50;
+
+  const ema21Strength =
+    ema21?.strength ?? 50;
+
+  const bullishStructure =
+    ema9Strength >= 52 &&
+    ema21Strength >= 52;
+
+  const bearishStructure =
+    ema9Strength <= 48 &&
+    ema21Strength <= 48;
+
   const trend: AnalysisResult['trend'] =
-    ema9?.signal === 'BUY' &&
-    ema21?.signal === 'BUY'
+    bullishStructure
       ? 'ALTA'
-      : ema9?.signal === 'SELL' &&
-          ema21?.signal === 'SELL'
+      : bearishStructure
         ? 'BAIXA'
         : 'LATERAL';
 

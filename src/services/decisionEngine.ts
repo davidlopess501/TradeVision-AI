@@ -54,14 +54,71 @@ export function evaluateAnalysis(
   if (
     analysis.finalSignal === 'SELL' &&
     analysis.trend === 'BAIXA' &&
-    analysis.score >= 65 &&
+    analysis.score <= 35 &&
     confidence >= 65
   ) {
     return {
       action: 'SELL',
       confidence,
       reason:
-        'Venda validada por tendência de baixa, score técnico e confiança suficientes.',
+        'Venda validada por tendência de baixa, score técnico vendedor e confiança suficientes.',
+    };
+  }
+
+  if (
+    analysis.finalSignal === 'BUY' &&
+    analysis.trend !== 'ALTA'
+  ) {
+    return {
+      action: 'WAIT',
+      confidence,
+      reason:
+        'Sinal de compra detectado, mas a tendência de alta ainda não foi confirmada.',
+    };
+  }
+
+  if (
+    analysis.finalSignal === 'SELL' &&
+    analysis.trend !== 'BAIXA'
+  ) {
+    return {
+      action: 'WAIT',
+      confidence,
+      reason:
+        'Sinal de venda detectado, mas a tendência de baixa ainda não foi confirmada.',
+    };
+  }
+
+  if (
+    analysis.finalSignal === 'BUY' &&
+    analysis.score < 65
+  ) {
+    return {
+      action: 'WAIT',
+      confidence,
+      reason:
+        'Sinal de compra detectado, mas o score técnico ainda está abaixo de 65.',
+    };
+  }
+
+  if (
+    analysis.finalSignal === 'SELL' &&
+    analysis.score > 35
+  ) {
+    return {
+      action: 'WAIT',
+      confidence,
+      reason:
+        'Sinal de venda detectado, mas o score técnico vendedor ainda não está forte o suficiente.',
+    };
+  }
+
+  if (confidence < 65) {
+    return {
+      action: 'WAIT',
+      confidence,
+      reason:
+        'A confiança combinada ainda está abaixo do mínimo de 65%.',
     };
   }
 
