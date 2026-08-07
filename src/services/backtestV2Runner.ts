@@ -41,14 +41,44 @@ export interface BacktestV2Config {
 interface BacktestDiagnostics {
   candlesReceived: number;
   windowsEvaluated: number;
+
+  finalSignalBuy: number;
+  finalSignalSell: number;
+  finalSignalWait: number;
+
+  trendAlta: number;
+  trendBaixa: number;
+  trendNeutra: number;
+
+  scoreAtLeast65: number;
+  confidenceAtLeast65: number;
+
+  buySignalAndTrend: number;
+  sellSignalAndTrend: number;
+
+  buyAllCriteria: number;
+  sellAllCriteria: number;
+
   decisionBuy: number;
   decisionSell: number;
   decisionWait: number;
+
   ordersReady: number;
   ordersBlocked: number;
+
   riskApproved: number;
   riskBlocked: number;
+
   tradesExecuted: number;
+
+  minScore: number;
+  maxScore: number;
+  scoreTotal: number;
+
+  minConfidence: number;
+  maxConfidence: number;
+  confidenceTotal: number;
+
   riskBlockReasons: Record<string, number>;
 }
 
@@ -92,14 +122,48 @@ export async function runBacktestV2(
       candlesReceived:
         config.candles.length,
       windowsEvaluated: 0,
+
+      finalSignalBuy: 0,
+      finalSignalSell: 0,
+      finalSignalWait: 0,
+
+      trendAlta: 0,
+      trendBaixa: 0,
+      trendNeutra: 0,
+
+      scoreAtLeast65: 0,
+      confidenceAtLeast65: 0,
+
+      buySignalAndTrend: 0,
+      sellSignalAndTrend: 0,
+
+      buyAllCriteria: 0,
+      sellAllCriteria: 0,
+
       decisionBuy: 0,
       decisionSell: 0,
       decisionWait: 0,
+
       ordersReady: 0,
       ordersBlocked: 0,
+
       riskApproved: 0,
       riskBlocked: 0,
+
       tradesExecuted: 0,
+
+      minScore:
+        Number.POSITIVE_INFINITY,
+      maxScore:
+        Number.NEGATIVE_INFINITY,
+      scoreTotal: 0,
+
+      minConfidence:
+        Number.POSITIVE_INFINITY,
+      maxConfidence:
+        Number.NEGATIVE_INFINITY,
+      confidenceTotal: 0,
+
       riskBlockReasons: {},
     };
 
@@ -139,7 +203,105 @@ export async function runBacktestV2(
         analysis,
       );
 
-    if (decision.action === 'BUY') {
+    diagnostics.minScore =
+      Math.min(
+        diagnostics.minScore,
+        analysis.score,
+      );
+
+    diagnostics.maxScore =
+      Math.max(
+        diagnostics.maxScore,
+        analysis.score,
+      );
+
+    diagnostics.scoreTotal +=
+      analysis.score;
+
+    diagnostics.minConfidence =
+      Math.min(
+        diagnostics.minConfidence,
+        decision.confidence,
+      );
+
+    diagnostics.maxConfidence =
+      Math.max(
+        diagnostics.maxConfidence,
+        decision.confidence,
+      );
+
+    diagnostics.confidenceTotal +=
+      decision.confidence;
+
+    if (
+      analysis.finalSignal === 'BUY'
+    ) {
+      diagnostics.finalSignalBuy += 1;
+    } else if (
+      analysis.finalSignal === 'SELL'
+    ) {
+      diagnostics.finalSignalSell += 1;
+    } else {
+      diagnostics.finalSignalWait += 1;
+    }
+
+    if (
+      analysis.trend === 'ALTA'
+    ) {
+      diagnostics.trendAlta += 1;
+    } else if (
+      analysis.trend === 'BAIXA'
+    ) {
+      diagnostics.trendBaixa += 1;
+    } else {
+      diagnostics.trendNeutra += 1;
+    }
+
+    if (analysis.score >= 65) {
+      diagnostics.scoreAtLeast65 += 1;
+    }
+
+    if (
+      decision.confidence >= 65
+    ) {
+      diagnostics.confidenceAtLeast65 += 1;
+    }
+
+    if (
+      analysis.finalSignal === 'BUY' &&
+      analysis.trend === 'ALTA'
+    ) {
+      diagnostics.buySignalAndTrend += 1;
+    }
+
+    if (
+      analysis.finalSignal === 'SELL' &&
+      analysis.trend === 'BAIXA'
+    ) {
+      diagnostics.sellSignalAndTrend += 1;
+    }
+
+    if (
+      analysis.finalSignal === 'BUY' &&
+      analysis.trend === 'ALTA' &&
+      analysis.score >= 65 &&
+      decision.confidence >= 65
+    ) {
+      diagnostics.buyAllCriteria += 1;
+    }
+
+    if (
+      analysis.finalSignal === 'SELL' &&
+      analysis.trend === 'BAIXA' &&
+      analysis.score >= 65 &&
+      decision.confidence >= 65
+    ) {
+      diagnostics.sellAllCriteria += 1;
+    }
+
+    if (
+      decision.action === 'BUY'
+    ) {
       diagnostics.decisionBuy += 1;
     } else if (
       decision.action === 'SELL'
@@ -225,8 +387,13 @@ export async function runBacktestV2(
     diagnostics.tradesExecuted += 1;
   }
 
+  const divisor =
+    diagnostics.windowsEvaluated > 0
+      ? diagnostics.windowsEvaluated
+      : 1;
+
   console.group(
-    '[TradeVision] Backtesting V2 Diagnostics',
+    '[TradeVision] Backtesting V2 Criteria Diagnostics',
   );
 
   console.table({
@@ -234,22 +401,91 @@ export async function runBacktestV2(
       diagnostics.candlesReceived,
     windowsEvaluated:
       diagnostics.windowsEvaluated,
+
+    finalSignalBuy:
+      diagnostics.finalSignalBuy,
+    finalSignalSell:
+      diagnostics.finalSignalSell,
+    finalSignalWait:
+      diagnostics.finalSignalWait,
+
+    trendAlta:
+      diagnostics.trendAlta,
+    trendBaixa:
+      diagnostics.trendBaixa,
+    trendNeutra:
+      diagnostics.trendNeutra,
+
+    scoreAtLeast65:
+      diagnostics.scoreAtLeast65,
+    confidenceAtLeast65:
+      diagnostics.confidenceAtLeast65,
+
+    buySignalAndTrend:
+      diagnostics.buySignalAndTrend,
+    sellSignalAndTrend:
+      diagnostics.sellSignalAndTrend,
+
+    buyAllCriteria:
+      diagnostics.buyAllCriteria,
+    sellAllCriteria:
+      diagnostics.sellAllCriteria,
+
     decisionBuy:
       diagnostics.decisionBuy,
     decisionSell:
       diagnostics.decisionSell,
     decisionWait:
       diagnostics.decisionWait,
+
     ordersReady:
       diagnostics.ordersReady,
     ordersBlocked:
       diagnostics.ordersBlocked,
+
     riskApproved:
       diagnostics.riskApproved,
     riskBlocked:
       diagnostics.riskBlocked,
+
     tradesExecuted:
       diagnostics.tradesExecuted,
+
+    minScore:
+      Number.isFinite(
+        diagnostics.minScore,
+      )
+        ? diagnostics.minScore
+        : 0,
+
+    avgScore:
+      diagnostics.scoreTotal /
+      divisor,
+
+    maxScore:
+      Number.isFinite(
+        diagnostics.maxScore,
+      )
+        ? diagnostics.maxScore
+        : 0,
+
+    minConfidence:
+      Number.isFinite(
+        diagnostics.minConfidence,
+      )
+        ? diagnostics.minConfidence
+        : 0,
+
+    avgConfidence:
+      diagnostics.confidenceTotal /
+      divisor,
+
+    maxConfidence:
+      Number.isFinite(
+        diagnostics.maxConfidence,
+      )
+        ? diagnostics.maxConfidence
+        : 0,
   });
 
   if (
