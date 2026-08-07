@@ -23,6 +23,14 @@ import {
 } from '@/services/riskManager';
 
 import {
+  runStrategyBacktest,
+} from '@/services/backtestRunner';
+
+import type {
+  BacktestResult,
+} from '@/services/backtestEngine';
+
+import {
   connectBroker,
   getBrokerAccount,
   getBrokerStatus,
@@ -89,6 +97,10 @@ import {
 import {
   RiskManagerPanel,
 } from '@/components/analysis/RiskManagerPanel';
+
+import {
+  BacktestPanel,
+} from '@/components/backtest/BacktestPanel';
 
 interface AnalysisScreenProps {
   initialAsset: Asset;
@@ -170,6 +182,12 @@ export default function AnalysisScreen({
     useState<DemoOrderHistoryItem[]>(
       () => getDemoOrderHistory(),
     );
+
+  const [backtestResult, setBacktestResult] =
+    useState<BacktestResult | null>(null);
+
+  const [backtestLoading, setBacktestLoading] =
+    useState(false);
 
   const fibonacciAnalysis = useMemo(
     () => analyzeFibonacci(candles),
@@ -254,6 +272,7 @@ export default function AnalysisScreen({
 
       setResult(nextResult);
       setCandles(nextCandles);
+      setBacktestResult(null);
       addHistory(nextResult);
       setLastBrokerOrder(null);
       setBrokerFeedback({
@@ -462,6 +481,29 @@ export default function AnalysisScreen({
     }
   }
 
+  async function handleRunBacktest() {
+    if (candles.length < 21) {
+      return;
+    }
+
+    setBacktestLoading(true);
+
+    try {
+      const nextResult =
+        await runStrategyBacktest({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          quantity: 1,
+          candles,
+        });
+
+      setBacktestResult(nextResult);
+    } finally {
+      setBacktestLoading(false);
+    }
+  }
+
   function handleClearDemoHistory() {
     clearDemoOrderHistory();
     setDemoOrderHistory([]);
@@ -661,6 +703,12 @@ export default function AnalysisScreen({
               rules={DEFAULT_RISK_RULES}
             />
           )}
+
+          <BacktestPanel
+            result={backtestResult}
+            loading={backtestLoading}
+            onRun={handleRunBacktest}
+          />
 
           {preparedOrder && (
             <BrokerPanel
