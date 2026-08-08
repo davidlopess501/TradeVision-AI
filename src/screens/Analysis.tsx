@@ -266,7 +266,7 @@ export default function AnalysisScreen({
           provider.getCandles(
             asset,
             timeframe,
-            1000,
+            5000,
           ),
         ]);
 
