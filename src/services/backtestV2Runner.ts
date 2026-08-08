@@ -87,6 +87,18 @@ interface BacktestDiagnostics {
   maxWinStreak: number;
   maxLossStreak: number;
 
+  buyTrades: number;
+  buyWins: number;
+  buyLosses: number;
+  buyGrossProfit: number;
+  buyGrossLoss: number;
+
+  sellTrades: number;
+  sellWins: number;
+  sellLosses: number;
+  sellGrossProfit: number;
+  sellGrossLoss: number;
+
   exitsByStop: number;
   exitsByTarget: number;
   exitsByEndOfData: number;
@@ -201,6 +213,18 @@ export async function runBacktestV2(
       currentLossStreak: 0,
       maxWinStreak: 0,
       maxLossStreak: 0,
+
+      buyTrades: 0,
+      buyWins: 0,
+      buyLosses: 0,
+      buyGrossProfit: 0,
+      buyGrossLoss: 0,
+
+      sellTrades: 0,
+      sellWins: 0,
+      sellLosses: 0,
+      sellGrossProfit: 0,
+      sellGrossLoss: 0,
 
       exitsByStop: 0,
       exitsByTarget: 0,
@@ -500,6 +524,30 @@ export async function runBacktestV2(
       diagnostics.currentLossStreak = 0;
     }
 
+    if (preparedOrder.side === 'BUY') {
+      diagnostics.buyTrades += 1;
+
+      if (pnl > 0) {
+        diagnostics.buyWins += 1;
+        diagnostics.buyGrossProfit += pnl;
+      } else if (pnl < 0) {
+        diagnostics.buyLosses += 1;
+        diagnostics.buyGrossLoss +=
+          Math.abs(pnl);
+      }
+    } else {
+      diagnostics.sellTrades += 1;
+
+      if (pnl > 0) {
+        diagnostics.sellWins += 1;
+        diagnostics.sellGrossProfit += pnl;
+      } else if (pnl < 0) {
+        diagnostics.sellLosses += 1;
+        diagnostics.sellGrossLoss +=
+          Math.abs(pnl);
+      }
+    }
+
     countExitReason(
       diagnostics,
       exitResult.reason,
@@ -534,6 +582,46 @@ export async function runBacktestV2(
     averageLoss > 0
       ? averageWin / averageLoss
       : 0;
+
+  const buyNetProfit =
+    diagnostics.buyGrossProfit -
+    diagnostics.buyGrossLoss;
+
+  const sellNetProfit =
+    diagnostics.sellGrossProfit -
+    diagnostics.sellGrossLoss;
+
+  const buyWinRate =
+    diagnostics.buyTrades > 0
+      ? (
+          diagnostics.buyWins /
+          diagnostics.buyTrades
+        ) * 100
+      : 0;
+
+  const sellWinRate =
+    diagnostics.sellTrades > 0
+      ? (
+          diagnostics.sellWins /
+          diagnostics.sellTrades
+        ) * 100
+      : 0;
+
+  const buyProfitFactor =
+    diagnostics.buyGrossLoss > 0
+      ? diagnostics.buyGrossProfit /
+        diagnostics.buyGrossLoss
+      : diagnostics.buyGrossProfit > 0
+        ? Number.POSITIVE_INFINITY
+        : 0;
+
+  const sellProfitFactor =
+    diagnostics.sellGrossLoss > 0
+      ? diagnostics.sellGrossProfit /
+        diagnostics.sellGrossLoss
+      : diagnostics.sellGrossProfit > 0
+        ? Number.POSITIVE_INFINITY
+        : 0;
 
   console.group(
     '[TradeVision] Backtesting V2 Stop/Target Diagnostics',
@@ -621,6 +709,26 @@ export async function runBacktestV2(
       diagnostics.maxWinStreak,
     maxLossStreak:
       diagnostics.maxLossStreak,
+
+    buyTrades:
+      diagnostics.buyTrades,
+    buyWins:
+      diagnostics.buyWins,
+    buyLosses:
+      diagnostics.buyLosses,
+    buyWinRate,
+    buyNetProfit,
+    buyProfitFactor,
+
+    sellTrades:
+      diagnostics.sellTrades,
+    sellWins:
+      diagnostics.sellWins,
+    sellLosses:
+      diagnostics.sellLosses,
+    sellWinRate,
+    sellNetProfit,
+    sellProfitFactor,
 
     exitsByStop:
       diagnostics.exitsByStop,
