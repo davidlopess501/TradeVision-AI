@@ -76,6 +76,17 @@ interface BacktestDiagnostics {
 
   tradesExecuted: number;
 
+  winningTrades: number;
+  losingTrades: number;
+  grossProfit: number;
+  grossLoss: number;
+  bestTrade: number;
+  worstTrade: number;
+  currentWinStreak: number;
+  currentLossStreak: number;
+  maxWinStreak: number;
+  maxLossStreak: number;
+
   exitsByStop: number;
   exitsByTarget: number;
   exitsByEndOfData: number;
@@ -177,6 +188,19 @@ export async function runBacktestV2(
       riskBlocked: 0,
 
       tradesExecuted: 0,
+
+      winningTrades: 0,
+      losingTrades: 0,
+      grossProfit: 0,
+      grossLoss: 0,
+      bestTrade:
+        Number.NEGATIVE_INFINITY,
+      worstTrade:
+        Number.POSITIVE_INFINITY,
+      currentWinStreak: 0,
+      currentLossStreak: 0,
+      maxWinStreak: 0,
+      maxLossStreak: 0,
 
       exitsByStop: 0,
       exitsByTarget: 0,
@@ -434,6 +458,48 @@ export async function runBacktestV2(
 
     diagnostics.tradesExecuted += 1;
 
+    diagnostics.bestTrade =
+      Math.max(
+        diagnostics.bestTrade,
+        pnl,
+      );
+
+    diagnostics.worstTrade =
+      Math.min(
+        diagnostics.worstTrade,
+        pnl,
+      );
+
+    if (pnl > 0) {
+      diagnostics.winningTrades += 1;
+      diagnostics.grossProfit += pnl;
+
+      diagnostics.currentWinStreak += 1;
+      diagnostics.currentLossStreak = 0;
+
+      diagnostics.maxWinStreak =
+        Math.max(
+          diagnostics.maxWinStreak,
+          diagnostics.currentWinStreak,
+        );
+    } else if (pnl < 0) {
+      diagnostics.losingTrades += 1;
+      diagnostics.grossLoss +=
+        Math.abs(pnl);
+
+      diagnostics.currentLossStreak += 1;
+      diagnostics.currentWinStreak = 0;
+
+      diagnostics.maxLossStreak =
+        Math.max(
+          diagnostics.maxLossStreak,
+          diagnostics.currentLossStreak,
+        );
+    } else {
+      diagnostics.currentWinStreak = 0;
+      diagnostics.currentLossStreak = 0;
+    }
+
     countExitReason(
       diagnostics,
       exitResult.reason,
@@ -451,6 +517,23 @@ export async function runBacktestV2(
     diagnostics.windowsEvaluated > 0
       ? diagnostics.windowsEvaluated
       : 1;
+
+  const averageWin =
+    diagnostics.winningTrades > 0
+      ? diagnostics.grossProfit /
+        diagnostics.winningTrades
+      : 0;
+
+  const averageLoss =
+    diagnostics.losingTrades > 0
+      ? diagnostics.grossLoss /
+        diagnostics.losingTrades
+      : 0;
+
+  const payoffRatio =
+    averageLoss > 0
+      ? averageWin / averageLoss
+      : 0;
 
   console.group(
     '[TradeVision] Backtesting V2 Stop/Target Diagnostics',
@@ -510,6 +593,34 @@ export async function runBacktestV2(
 
     tradesExecuted:
       diagnostics.tradesExecuted,
+
+    winningTrades:
+      diagnostics.winningTrades,
+    losingTrades:
+      diagnostics.losingTrades,
+
+    averageWin,
+    averageLoss,
+    payoffRatio,
+
+    bestTrade:
+      Number.isFinite(
+        diagnostics.bestTrade,
+      )
+        ? diagnostics.bestTrade
+        : 0,
+
+    worstTrade:
+      Number.isFinite(
+        diagnostics.worstTrade,
+      )
+        ? diagnostics.worstTrade
+        : 0,
+
+    maxWinStreak:
+      diagnostics.maxWinStreak,
+    maxLossStreak:
+      diagnostics.maxLossStreak,
 
     exitsByStop:
       diagnostics.exitsByStop,
