@@ -178,6 +178,67 @@ function sellBucketSummary(
   };
 }
 
+
+interface SellIndicatorDiagnostic {
+  trades: number;
+  ema9Total: number;
+  ema21Total: number;
+  rsiTotal: number;
+  macdTotal: number;
+  volumeTotal: number;
+}
+
+function createSellIndicatorDiagnostic(): SellIndicatorDiagnostic {
+  return {
+    trades: 0,
+    ema9Total: 0,
+    ema21Total: 0,
+    rsiTotal: 0,
+    macdTotal: 0,
+    volumeTotal: 0,
+  };
+}
+
+function registerSellIndicators(
+  bucket: SellIndicatorDiagnostic,
+  analysis: ReturnType<typeof buildHistoricalAnalysis>,
+): void {
+  const strength = (key: string): number =>
+    analysis.indicators.find(
+      (indicator) => indicator.key === key,
+    )?.strength ?? 50;
+
+  bucket.trades += 1;
+  bucket.ema9Total += strength('ema9');
+  bucket.ema21Total += strength('ema21');
+  bucket.rsiTotal += strength('rsi');
+  bucket.macdTotal += strength('macd');
+  bucket.volumeTotal += strength('volume');
+}
+
+function sellIndicatorSummary(
+  bucket: SellIndicatorDiagnostic,
+) {
+  const divisor =
+    bucket.trades > 0
+      ? bucket.trades
+      : 1;
+
+  return {
+    trades: bucket.trades,
+    avgEma9:
+      bucket.ema9Total / divisor,
+    avgEma21:
+      bucket.ema21Total / divisor,
+    avgRsi:
+      bucket.rsiTotal / divisor,
+    avgMacd:
+      bucket.macdTotal / divisor,
+    avgVolume:
+      bucket.volumeTotal / divisor,
+  };
+}
+
 function uid(): string {
   return (
     crypto.randomUUID?.() ??
@@ -323,6 +384,12 @@ export async function runBacktestV2(
     'conf75-79': createSellBucketStats(),
     'conf80+': createSellBucketStats(),
   };
+
+  const sellWinningIndicators =
+    createSellIndicatorDiagnostic();
+
+  const sellLosingIndicators =
+    createSellIndicatorDiagnostic();
 
   const windowSize = 120;
 
@@ -655,6 +722,18 @@ export async function runBacktestV2(
         sellByConfidence[confidenceBucket],
         pnl,
       );
+
+      if (pnl > 0) {
+        registerSellIndicators(
+          sellWinningIndicators,
+          analysis,
+        );
+      } else if (pnl < 0) {
+        registerSellIndicators(
+          sellLosingIndicators,
+          analysis,
+        );
+      }
     }
 
     countExitReason(
@@ -930,6 +1009,21 @@ export async function runBacktestV2(
     'conf80+':
       sellBucketSummary(
         sellByConfidence['conf80+'],
+      ),
+  });
+
+  console.log(
+    '[TradeVision] SELL Winners vs Losers - Indicadores',
+  );
+
+  console.table({
+    winners:
+      sellIndicatorSummary(
+        sellWinningIndicators,
+      ),
+    losers:
+      sellIndicatorSummary(
+        sellLosingIndicators,
       ),
   });
 
