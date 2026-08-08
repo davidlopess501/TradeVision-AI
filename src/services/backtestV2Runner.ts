@@ -239,6 +239,90 @@ function sellIndicatorSummary(
   };
 }
 
+
+interface SellMomentumDiagnostic {
+  trades: number;
+  return3Total: number;
+  return5Total: number;
+  return10Total: number;
+  return20Total: number;
+}
+
+function createSellMomentumDiagnostic(): SellMomentumDiagnostic {
+  return {
+    trades: 0,
+    return3Total: 0,
+    return5Total: 0,
+    return10Total: 0,
+    return20Total: 0,
+  };
+}
+
+function percentReturn(
+  candles: Candle[],
+  lookback: number,
+): number {
+  const last =
+    candles[candles.length - 1];
+
+  const previous =
+    candles[
+      Math.max(
+        0,
+        candles.length - 1 - lookback,
+      )
+    ];
+
+  if (
+    !last ||
+    !previous ||
+    previous.close === 0
+  ) {
+    return 0;
+  }
+
+  return (
+    (last.close - previous.close) /
+    previous.close
+  ) * 100;
+}
+
+function registerSellMomentum(
+  bucket: SellMomentumDiagnostic,
+  candles: Candle[],
+): void {
+  bucket.trades += 1;
+  bucket.return3Total +=
+    percentReturn(candles, 3);
+  bucket.return5Total +=
+    percentReturn(candles, 5);
+  bucket.return10Total +=
+    percentReturn(candles, 10);
+  bucket.return20Total +=
+    percentReturn(candles, 20);
+}
+
+function sellMomentumSummary(
+  bucket: SellMomentumDiagnostic,
+) {
+  const divisor =
+    bucket.trades > 0
+      ? bucket.trades
+      : 1;
+
+  return {
+    trades: bucket.trades,
+    avgReturn3:
+      bucket.return3Total / divisor,
+    avgReturn5:
+      bucket.return5Total / divisor,
+    avgReturn10:
+      bucket.return10Total / divisor,
+    avgReturn20:
+      bucket.return20Total / divisor,
+  };
+}
+
 function uid(): string {
   return (
     crypto.randomUUID?.() ??
@@ -390,6 +474,12 @@ export async function runBacktestV2(
 
   const sellLosingIndicators =
     createSellIndicatorDiagnostic();
+
+  const sellWinningMomentum =
+    createSellMomentumDiagnostic();
+
+  const sellLosingMomentum =
+    createSellMomentumDiagnostic();
 
   const windowSize = 120;
 
@@ -728,10 +818,20 @@ export async function runBacktestV2(
           sellWinningIndicators,
           analysis,
         );
+
+        registerSellMomentum(
+          sellWinningMomentum,
+          historicalCandles,
+        );
       } else if (pnl < 0) {
         registerSellIndicators(
           sellLosingIndicators,
           analysis,
+        );
+
+        registerSellMomentum(
+          sellLosingMomentum,
+          historicalCandles,
         );
       }
     }
@@ -1024,6 +1124,21 @@ export async function runBacktestV2(
     losers:
       sellIndicatorSummary(
         sellLosingIndicators,
+      ),
+  });
+
+  console.log(
+    '[TradeVision] SELL Winners vs Losers - Momentum',
+  );
+
+  console.table({
+    winners:
+      sellMomentumSummary(
+        sellWinningMomentum,
+      ),
+    losers:
+      sellMomentumSummary(
+        sellLosingMomentum,
       ),
   });
 
