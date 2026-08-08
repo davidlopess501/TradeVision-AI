@@ -497,13 +497,38 @@ export default function AnalysisScreen({
 
     try {
       /*
-       * IMPORTANTE:
-       * - developmentCandles = bloco mais antigo
-       * - validationCandles = bloco mais recente
+       * Stress test de custos no BUY_ONLY.
        *
-       * Os períodos não se sobrepõem.
-       * Nenhuma regra da estratégia é alterada aqui.
+       * ZERO:
+       * - sem slippage
+       * - sem custo fixo
+       *
+       * LEVE:
+       * - 1 ponto de slippage por lado
+       * - R$ 0,50 de custo fixo por contrato / round trip
+       *
+       * MODERADO:
+       * - 2 pontos de slippage por lado
+       * - R$ 1,00 de custo fixo por contrato / round trip
+       *
+       * Estes valores são cenários de teste configuráveis,
+       * não uma afirmação de custos oficiais de corretora/B3.
        */
+      const costScenarios = {
+        ZERO: {
+          slippagePointsPerSide: 0,
+          fixedCostPerContractRoundTrip: 0,
+        },
+        LEVE: {
+          slippagePointsPerSide: 1,
+          fixedCostPerContractRoundTrip: 0.5,
+        },
+        MODERADO: {
+          slippagePointsPerSide: 2,
+          fixedCostPerContractRoundTrip: 1,
+        },
+      } as const;
+
       const developmentCandles =
         candles.slice(
           candles.length - blockSize * 2,
@@ -516,157 +541,128 @@ export default function AnalysisScreen({
         );
 
       console.group(
-        '[TradeVision] OUT-OF-SAMPLE — BLOCO A / DESENVOLVIMENTO',
+        '[TradeVision] BUY_ONLY — STRESS TEST DE CUSTOS',
       );
-
-      console.log({
-        candles:
-          developmentCandles.length,
-        from:
-          developmentCandles[0]?.time,
-        to:
-          developmentCandles[
-            developmentCandles.length - 1
-          ]?.time,
-      });
-
-      const developmentBoth =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles:
-            developmentCandles,
-          strategyMode: 'BOTH',
-        });
 
       console.log(
-        '[TradeVision] Resultado Bloco A — BOTH',
-        developmentBoth,
+        '[TradeVision] Cenários',
+        costScenarios,
       );
 
-      const developmentBuyOnly =
+      const developmentZero =
         await runBacktestV2({
           asset,
           timeframe,
           initialCapital: 10000,
-          candles:
-            developmentCandles,
+          candles: developmentCandles,
           strategyMode: 'BUY_ONLY',
+          executionCosts: costScenarios.ZERO,
         });
 
-      console.log(
-        '[TradeVision] Resultado Bloco A — BUY_ONLY',
-        developmentBuyOnly,
-      );
-
-      console.groupEnd();
-
-      console.group(
-        '[TradeVision] OUT-OF-SAMPLE — BLOCO B / VALIDAÇÃO',
-      );
-
-      console.log({
-        candles:
-          validationCandles.length,
-        from:
-          validationCandles[0]?.time,
-        to:
-          validationCandles[
-            validationCandles.length - 1
-          ]?.time,
-      });
-
-      const validationBoth =
+      const developmentLight =
         await runBacktestV2({
           asset,
           timeframe,
           initialCapital: 10000,
-          candles:
-            validationCandles,
-          strategyMode: 'BOTH',
-        });
-
-      console.log(
-        '[TradeVision] Resultado Bloco B — BOTH',
-        validationBoth,
-      );
-
-      const validationBuyOnly =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles:
-            validationCandles,
+          candles: developmentCandles,
           strategyMode: 'BUY_ONLY',
+          executionCosts: costScenarios.LEVE,
         });
 
-      console.log(
-        '[TradeVision] Resultado Bloco B — BUY_ONLY',
-        validationBuyOnly,
-      );
+      const developmentModerate =
+        await runBacktestV2({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          candles: developmentCandles,
+          strategyMode: 'BUY_ONLY',
+          executionCosts: costScenarios.MODERADO,
+        });
+
+      const validationZero =
+        await runBacktestV2({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          candles: validationCandles,
+          strategyMode: 'BUY_ONLY',
+          executionCosts: costScenarios.ZERO,
+        });
+
+      const validationLight =
+        await runBacktestV2({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          candles: validationCandles,
+          strategyMode: 'BUY_ONLY',
+          executionCosts: costScenarios.LEVE,
+        });
+
+      const validationModerate =
+        await runBacktestV2({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          candles: validationCandles,
+          strategyMode: 'BUY_ONLY',
+          executionCosts: costScenarios.MODERADO,
+        });
 
       console.table({
-        'A — BOTH': {
-          trades:
-            developmentBoth.totalTrades,
-          winRate:
-            developmentBoth.winRate,
-          netProfit:
-            developmentBoth.netProfit,
-          profitFactor:
-            developmentBoth.profitFactor,
-          maxDrawdown:
-            developmentBoth.maxDrawdown,
+        'A — ZERO': {
+          trades: developmentZero.totalTrades,
+          winRate: developmentZero.winRate,
+          netProfit: developmentZero.netProfit,
+          profitFactor: developmentZero.profitFactor,
+          maxDrawdown: developmentZero.maxDrawdown,
         },
-        'A — BUY_ONLY': {
-          trades:
-            developmentBuyOnly.totalTrades,
-          winRate:
-            developmentBuyOnly.winRate,
-          netProfit:
-            developmentBuyOnly.netProfit,
-          profitFactor:
-            developmentBuyOnly.profitFactor,
-          maxDrawdown:
-            developmentBuyOnly.maxDrawdown,
+        'A — LEVE': {
+          trades: developmentLight.totalTrades,
+          winRate: developmentLight.winRate,
+          netProfit: developmentLight.netProfit,
+          profitFactor: developmentLight.profitFactor,
+          maxDrawdown: developmentLight.maxDrawdown,
         },
-        'B — BOTH': {
-          trades:
-            validationBoth.totalTrades,
-          winRate:
-            validationBoth.winRate,
-          netProfit:
-            validationBoth.netProfit,
-          profitFactor:
-            validationBoth.profitFactor,
-          maxDrawdown:
-            validationBoth.maxDrawdown,
+        'A — MODERADO': {
+          trades: developmentModerate.totalTrades,
+          winRate: developmentModerate.winRate,
+          netProfit: developmentModerate.netProfit,
+          profitFactor: developmentModerate.profitFactor,
+          maxDrawdown: developmentModerate.maxDrawdown,
         },
-        'B — BUY_ONLY': {
-          trades:
-            validationBuyOnly.totalTrades,
-          winRate:
-            validationBuyOnly.winRate,
-          netProfit:
-            validationBuyOnly.netProfit,
-          profitFactor:
-            validationBuyOnly.profitFactor,
-          maxDrawdown:
-            validationBuyOnly.maxDrawdown,
+        'B — ZERO': {
+          trades: validationZero.totalTrades,
+          winRate: validationZero.winRate,
+          netProfit: validationZero.netProfit,
+          profitFactor: validationZero.profitFactor,
+          maxDrawdown: validationZero.maxDrawdown,
+        },
+        'B — LEVE': {
+          trades: validationLight.totalTrades,
+          winRate: validationLight.winRate,
+          netProfit: validationLight.netProfit,
+          profitFactor: validationLight.profitFactor,
+          maxDrawdown: validationLight.maxDrawdown,
+        },
+        'B — MODERADO': {
+          trades: validationModerate.totalTrades,
+          winRate: validationModerate.winRate,
+          netProfit: validationModerate.netProfit,
+          profitFactor: validationModerate.profitFactor,
+          maxDrawdown: validationModerate.maxDrawdown,
         },
       });
 
       console.groupEnd();
 
       /*
-       * O painel mostra a validação fora da amostra
-       * em modo BUY_ONLY para este experimento.
-       * O Console mantém os quatro cenários separados.
+       * O painel mostra o cenário MODERADO do Bloco B.
+       * Assim, visualmente, acompanhamos a validação mais exigente
+       * entre os três cenários deste experimento.
        */
       setBacktestResult(
-        validationBuyOnly,
+        validationModerate,
       );
     } finally {
       setBacktestLoading(false);

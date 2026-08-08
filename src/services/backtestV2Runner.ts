@@ -33,6 +33,11 @@ import {
 } from './backtestExitSimulator';
 
 import {
+  applyBacktestExecutionCosts,
+  type BacktestExecutionCostConfig,
+} from './backtestExecutionCosts';
+
+import {
   ASSETS,
 } from '@/lib/assets';
 
@@ -49,6 +54,12 @@ export interface BacktestV2Config {
    * Default: BOTH.
    */
   strategyMode?: 'BOTH' | 'BUY_ONLY';
+
+  /**
+   * Custos opcionais de execução.
+   * Sem configuração, o comportamento antigo é preservado (custo zero).
+   */
+  executionCosts?: Partial<BacktestExecutionCostConfig>;
 }
 
 interface BacktestDiagnostics {
@@ -382,6 +393,13 @@ export async function runBacktestV2(
 ): Promise<BacktestResult> {
   const strategyMode =
     config.strategyMode ?? 'BOTH';
+
+  const executionCosts: BacktestExecutionCostConfig = {
+    slippagePointsPerSide:
+      config.executionCosts?.slippagePointsPerSide ?? 0,
+    fixedCostPerContractRoundTrip:
+      config.executionCosts?.fixedCostPerContractRoundTrip ?? 0,
+  };
 
   const trades:
     BacktestTrade[] = [];
@@ -719,12 +737,29 @@ export async function runBacktestV2(
         ? exit - entry
         : entry - exit;
 
-    const pnl =
-      points *
+    const assetMoneyPerPoint =
       moneyPerPoint(
         config.asset,
-      ) *
+      );
+
+    const grossPnl =
+      points *
+      assetMoneyPerPoint *
       risk.quantity;
+
+    const executionCostResult =
+      applyBacktestExecutionCosts({
+        grossPnl,
+        quantity:
+          risk.quantity,
+        moneyPerPoint:
+          assetMoneyPerPoint,
+        config:
+          executionCosts,
+      });
+
+    const pnl =
+      executionCostResult.netPnl;
 
     trades.push({
       id: uid(),
@@ -936,6 +971,11 @@ export async function runBacktestV2(
 
   console.group(
     `[TradeVision] Backtesting V2 Stop/Target Diagnostics — ${strategyMode}`,
+  );
+
+  console.log(
+    '[TradeVision] Execution Costs',
+    executionCosts,
   );
 
   console.table({
