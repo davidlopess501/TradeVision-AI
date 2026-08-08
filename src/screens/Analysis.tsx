@@ -266,7 +266,7 @@ export default function AnalysisScreen({
           provider.getCandles(
             asset,
             timeframe,
-            5000,
+            10000,
           ),
         ]);
 
@@ -482,22 +482,108 @@ export default function AnalysisScreen({
   }
 
   async function handleRunBacktest() {
-    if (candles.length < 21) {
+    const blockSize = 5000;
+
+    if (candles.length < blockSize * 2) {
+      console.warn(
+        `[TradeVision] Validação fora da amostra requer ${
+          blockSize * 2
+        } candles. Recebidos: ${candles.length}.`,
+      );
       return;
     }
 
     setBacktestLoading(true);
 
     try {
-      const nextResult =
+      /*
+       * IMPORTANTE:
+       * - developmentCandles = bloco mais antigo
+       * - validationCandles = bloco mais recente
+       *
+       * Os períodos não se sobrepõem.
+       * Nenhuma regra da estratégia é alterada aqui.
+       */
+      const developmentCandles =
+        candles.slice(
+          candles.length - blockSize * 2,
+          candles.length - blockSize,
+        );
+
+      const validationCandles =
+        candles.slice(
+          candles.length - blockSize,
+        );
+
+      console.group(
+        '[TradeVision] OUT-OF-SAMPLE — BLOCO A / DESENVOLVIMENTO',
+      );
+
+      console.log({
+        candles:
+          developmentCandles.length,
+        from:
+          developmentCandles[0]?.time,
+        to:
+          developmentCandles[
+            developmentCandles.length - 1
+          ]?.time,
+      });
+
+      const developmentResult =
         await runBacktestV2({
           asset,
           timeframe,
           initialCapital: 10000,
-          candles,
+          candles:
+            developmentCandles,
         });
 
-      setBacktestResult(nextResult);
+      console.log(
+        '[TradeVision] Resultado Bloco A',
+        developmentResult,
+      );
+
+      console.groupEnd();
+
+      console.group(
+        '[TradeVision] OUT-OF-SAMPLE — BLOCO B / VALIDAÇÃO',
+      );
+
+      console.log({
+        candles:
+          validationCandles.length,
+        from:
+          validationCandles[0]?.time,
+        to:
+          validationCandles[
+            validationCandles.length - 1
+          ]?.time,
+      });
+
+      const validationResult =
+        await runBacktestV2({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          candles:
+            validationCandles,
+        });
+
+      console.log(
+        '[TradeVision] Resultado Bloco B',
+        validationResult,
+      );
+
+      console.groupEnd();
+
+      /*
+       * O painel mostra o resultado fora da amostra (Bloco B).
+       * O Console mantém os dois blocos separados para comparação.
+       */
+      setBacktestResult(
+        validationResult,
+      );
     } finally {
       setBacktestLoading(false);
     }
