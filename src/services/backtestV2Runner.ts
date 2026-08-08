@@ -28,6 +28,11 @@ import {
 } from './backtestEngine';
 
 import {
+  simulateBacktestExit,
+  type BacktestExitReason,
+} from './backtestExitSimulator';
+
+import {
   ASSETS,
 } from '@/lib/assets';
 
@@ -71,6 +76,10 @@ interface BacktestDiagnostics {
 
   tradesExecuted: number;
 
+  exitsByStop: number;
+  exitsByTarget: number;
+  exitsByEndOfData: number;
+
   minScore: number;
   maxScore: number;
   scoreTotal: number;
@@ -109,6 +118,23 @@ function countReason(
 ): void {
   map[reason] =
     (map[reason] ?? 0) + 1;
+}
+
+function countExitReason(
+  diagnostics: BacktestDiagnostics,
+  reason: BacktestExitReason,
+): void {
+  if (reason === 'STOP') {
+    diagnostics.exitsByStop += 1;
+    return;
+  }
+
+  if (reason === 'TARGET') {
+    diagnostics.exitsByTarget += 1;
+    return;
+  }
+
+  diagnostics.exitsByEndOfData += 1;
 }
 
 export async function runBacktestV2(
@@ -151,6 +177,10 @@ export async function runBacktestV2(
       riskBlocked: 0,
 
       tradesExecuted: 0,
+
+      exitsByStop: 0,
+      exitsByTarget: 0,
+      exitsByEndOfData: 0,
 
       minScore:
         Number.POSITIVE_INFINITY,
@@ -293,7 +323,7 @@ export async function runBacktestV2(
     if (
       analysis.finalSignal === 'SELL' &&
       analysis.trend === 'BAIXA' &&
-      analysis.score >= 65 &&
+      analysis.score <= 35 &&
       decision.confidence >= 65
     ) {
       diagnostics.sellAllCriteria += 1;
@@ -353,11 +383,29 @@ export async function runBacktestV2(
 
     diagnostics.riskApproved += 1;
 
+    const exitResult =
+      simulateBacktestExit({
+        side:
+          preparedOrder.side,
+        stop:
+          preparedOrder.stop,
+        target:
+          preparedOrder.target,
+        candles:
+          config.candles,
+        startIndex:
+          index + 1,
+      });
+
+    if (!exitResult) {
+      break;
+    }
+
     const entry =
       preparedOrder.entry;
 
     const exit =
-      nextCandle.close;
+      exitResult.exitPrice;
 
     const points =
       preparedOrder.side === 'BUY'
@@ -381,10 +429,22 @@ export async function runBacktestV2(
       openedAt:
         config.candles[index].time,
       closedAt:
-        nextCandle.time,
+        exitResult.closedAt,
     });
 
     diagnostics.tradesExecuted += 1;
+
+    countExitReason(
+      diagnostics,
+      exitResult.reason,
+    );
+
+    if (
+      exitResult.exitIndex > index
+    ) {
+      index =
+        exitResult.exitIndex;
+    }
   }
 
   const divisor =
@@ -393,7 +453,7 @@ export async function runBacktestV2(
       : 1;
 
   console.group(
-    '[TradeVision] Backtesting V2 Criteria Diagnostics',
+    '[TradeVision] Backtesting V2 Stop/Target Diagnostics',
   );
 
   console.table({
@@ -450,6 +510,13 @@ export async function runBacktestV2(
 
     tradesExecuted:
       diagnostics.tradesExecuted,
+
+    exitsByStop:
+      diagnostics.exitsByStop,
+    exitsByTarget:
+      diagnostics.exitsByTarget,
+    exitsByEndOfData:
+      diagnostics.exitsByEndOfData,
 
     minScore:
       Number.isFinite(
