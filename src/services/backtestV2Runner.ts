@@ -114,6 +114,70 @@ interface BacktestDiagnostics {
   riskBlockReasons: Record<string, number>;
 }
 
+
+interface SellBucketStats {
+  trades: number;
+  wins: number;
+  losses: number;
+  grossProfit: number;
+  grossLoss: number;
+}
+
+function createSellBucketStats(): SellBucketStats {
+  return {
+    trades: 0,
+    wins: 0,
+    losses: 0,
+    grossProfit: 0,
+    grossLoss: 0,
+  };
+}
+
+function registerSellBucketTrade(
+  bucket: SellBucketStats,
+  pnl: number,
+): void {
+  bucket.trades += 1;
+
+  if (pnl > 0) {
+    bucket.wins += 1;
+    bucket.grossProfit += pnl;
+  } else if (pnl < 0) {
+    bucket.losses += 1;
+    bucket.grossLoss += Math.abs(pnl);
+  }
+}
+
+function sellBucketSummary(
+  bucket: SellBucketStats,
+) {
+  const winRate =
+    bucket.trades > 0
+      ? (bucket.wins / bucket.trades) * 100
+      : 0;
+
+  const netProfit =
+    bucket.grossProfit -
+    bucket.grossLoss;
+
+  const profitFactor =
+    bucket.grossLoss > 0
+      ? bucket.grossProfit /
+        bucket.grossLoss
+      : bucket.grossProfit > 0
+        ? Number.POSITIVE_INFINITY
+        : 0;
+
+  return {
+    trades: bucket.trades,
+    wins: bucket.wins,
+    losses: bucket.losses,
+    winRate,
+    netProfit,
+    profitFactor,
+  };
+}
+
 function uid(): string {
   return (
     crypto.randomUUID?.() ??
@@ -244,6 +308,21 @@ export async function runBacktestV2(
 
       riskBlockReasons: {},
     };
+
+  const sellByScore: Record<string, SellBucketStats> = {
+    'score<=31': createSellBucketStats(),
+    'score32': createSellBucketStats(),
+    'score33': createSellBucketStats(),
+    'score34': createSellBucketStats(),
+    'score35': createSellBucketStats(),
+  };
+
+  const sellByConfidence: Record<string, SellBucketStats> = {
+    'conf65-69': createSellBucketStats(),
+    'conf70-74': createSellBucketStats(),
+    'conf75-79': createSellBucketStats(),
+    'conf80+': createSellBucketStats(),
+  };
 
   const windowSize = 120;
 
@@ -546,6 +625,36 @@ export async function runBacktestV2(
         diagnostics.sellGrossLoss +=
           Math.abs(pnl);
       }
+
+      const scoreBucket =
+        analysis.score <= 31
+          ? 'score<=31'
+          : analysis.score === 32
+            ? 'score32'
+            : analysis.score === 33
+              ? 'score33'
+              : analysis.score === 34
+                ? 'score34'
+                : 'score35';
+
+      registerSellBucketTrade(
+        sellByScore[scoreBucket],
+        pnl,
+      );
+
+      const confidenceBucket =
+        decision.confidence < 70
+          ? 'conf65-69'
+          : decision.confidence < 75
+            ? 'conf70-74'
+            : decision.confidence < 80
+              ? 'conf75-79'
+              : 'conf80+';
+
+      registerSellBucketTrade(
+        sellByConfidence[confidenceBucket],
+        pnl,
+      );
     }
 
     countExitReason(
@@ -772,6 +881,56 @@ export async function runBacktestV2(
       )
         ? diagnostics.maxConfidence
         : 0,
+  });
+
+  console.log(
+    '[TradeVision] SELL por Score',
+  );
+
+  console.table({
+    'score<=31':
+      sellBucketSummary(
+        sellByScore['score<=31'],
+      ),
+    score32:
+      sellBucketSummary(
+        sellByScore.score32,
+      ),
+    score33:
+      sellBucketSummary(
+        sellByScore.score33,
+      ),
+    score34:
+      sellBucketSummary(
+        sellByScore.score34,
+      ),
+    score35:
+      sellBucketSummary(
+        sellByScore.score35,
+      ),
+  });
+
+  console.log(
+    '[TradeVision] SELL por Confidence',
+  );
+
+  console.table({
+    'conf65-69':
+      sellBucketSummary(
+        sellByConfidence['conf65-69'],
+      ),
+    'conf70-74':
+      sellBucketSummary(
+        sellByConfidence['conf70-74'],
+      ),
+    'conf75-79':
+      sellBucketSummary(
+        sellByConfidence['conf75-79'],
+      ),
+    'conf80+':
+      sellBucketSummary(
+        sellByConfidence['conf80+'],
+      ),
   });
 
   if (
