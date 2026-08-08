@@ -530,18 +530,34 @@ export default function AnalysisScreen({
           ]?.time,
       });
 
-      const developmentResult =
+      const developmentBoth =
         await runBacktestV2({
           asset,
           timeframe,
           initialCapital: 10000,
           candles:
             developmentCandles,
+          strategyMode: 'BOTH',
         });
 
       console.log(
-        '[TradeVision] Resultado Bloco A',
-        developmentResult,
+        '[TradeVision] Resultado Bloco A — BOTH',
+        developmentBoth,
+      );
+
+      const developmentBuyOnly =
+        await runBacktestV2({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          candles:
+            developmentCandles,
+          strategyMode: 'BUY_ONLY',
+        });
+
+      console.log(
+        '[TradeVision] Resultado Bloco A — BUY_ONLY',
+        developmentBuyOnly,
       );
 
       console.groupEnd();
@@ -561,28 +577,96 @@ export default function AnalysisScreen({
           ]?.time,
       });
 
-      const validationResult =
+      const validationBoth =
         await runBacktestV2({
           asset,
           timeframe,
           initialCapital: 10000,
           candles:
             validationCandles,
+          strategyMode: 'BOTH',
         });
 
       console.log(
-        '[TradeVision] Resultado Bloco B',
-        validationResult,
+        '[TradeVision] Resultado Bloco B — BOTH',
+        validationBoth,
       );
+
+      const validationBuyOnly =
+        await runBacktestV2({
+          asset,
+          timeframe,
+          initialCapital: 10000,
+          candles:
+            validationCandles,
+          strategyMode: 'BUY_ONLY',
+        });
+
+      console.log(
+        '[TradeVision] Resultado Bloco B — BUY_ONLY',
+        validationBuyOnly,
+      );
+
+      console.table({
+        'A — BOTH': {
+          trades:
+            developmentBoth.totalTrades,
+          winRate:
+            developmentBoth.winRate,
+          netProfit:
+            developmentBoth.netProfit,
+          profitFactor:
+            developmentBoth.profitFactor,
+          maxDrawdown:
+            developmentBoth.maxDrawdown,
+        },
+        'A — BUY_ONLY': {
+          trades:
+            developmentBuyOnly.totalTrades,
+          winRate:
+            developmentBuyOnly.winRate,
+          netProfit:
+            developmentBuyOnly.netProfit,
+          profitFactor:
+            developmentBuyOnly.profitFactor,
+          maxDrawdown:
+            developmentBuyOnly.maxDrawdown,
+        },
+        'B — BOTH': {
+          trades:
+            validationBoth.totalTrades,
+          winRate:
+            validationBoth.winRate,
+          netProfit:
+            validationBoth.netProfit,
+          profitFactor:
+            validationBoth.profitFactor,
+          maxDrawdown:
+            validationBoth.maxDrawdown,
+        },
+        'B — BUY_ONLY': {
+          trades:
+            validationBuyOnly.totalTrades,
+          winRate:
+            validationBuyOnly.winRate,
+          netProfit:
+            validationBuyOnly.netProfit,
+          profitFactor:
+            validationBuyOnly.profitFactor,
+          maxDrawdown:
+            validationBuyOnly.maxDrawdown,
+        },
+      });
 
       console.groupEnd();
 
       /*
-       * O painel mostra o resultado fora da amostra (Bloco B).
-       * O Console mantém os dois blocos separados para comparação.
+       * O painel mostra a validação fora da amostra
+       * em modo BUY_ONLY para este experimento.
+       * O Console mantém os quatro cenários separados.
        */
       setBacktestResult(
-        validationResult,
+        validationBuyOnly,
       );
     } finally {
       setBacktestLoading(false);

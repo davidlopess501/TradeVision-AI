@@ -41,6 +41,14 @@ export interface BacktestV2Config {
   timeframe: Timeframe;
   initialCapital: number;
   candles: Candle[];
+
+  /**
+   * BOTH = executa BUY e SELL normalmente.
+   * BUY_ONLY = mantém toda a estratégia, mas ignora ordens SELL.
+   *
+   * Default: BOTH.
+   */
+  strategyMode?: 'BOTH' | 'BUY_ONLY';
 }
 
 interface BacktestDiagnostics {
@@ -372,6 +380,9 @@ function countExitReason(
 export async function runBacktestV2(
   config: BacktestV2Config,
 ): Promise<BacktestResult> {
+  const strategyMode =
+    config.strategyMode ?? 'BOTH';
+
   const trades:
     BacktestTrade[] = [];
 
@@ -638,6 +649,18 @@ export async function runBacktestV2(
       diagnostics.ordersReady += 1;
     } else {
       diagnostics.ordersBlocked += 1;
+      continue;
+    }
+
+    /*
+     * Experimento controlado:
+     * em BUY_ONLY, sinais/decisões continuam sendo calculados
+     * normalmente, mas ordens SELL não entram na lista de trades.
+     */
+    if (
+      strategyMode === 'BUY_ONLY' &&
+      preparedOrder.side === 'SELL'
+    ) {
       continue;
     }
 
@@ -912,7 +935,7 @@ export async function runBacktestV2(
         : 0;
 
   console.group(
-    '[TradeVision] Backtesting V2 Stop/Target Diagnostics',
+    `[TradeVision] Backtesting V2 Stop/Target Diagnostics — ${strategyMode}`,
   );
 
   console.table({
