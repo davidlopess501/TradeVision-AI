@@ -1,12 +1,12 @@
 export interface BacktestExecutionCostConfig {
   /**
-   * Slippage adverso, em pontos, aplicado em cada lado da operação:
+   * Slippage adverso, em ticks, aplicado em cada lado da operação:
    * entrada e saída.
    *
    * Exemplo:
-   * 5 pontos por lado = 10 pontos de impacto total no round trip.
+   * 1 tick por lado = 2 ticks de impacto total no round trip.
    */
-  slippagePointsPerSide: number;
+  slippageTicksPerSide: number;
 
   /**
    * Custo financeiro fixo do round trip por contrato.
@@ -28,20 +28,37 @@ export interface BacktestExecutionCostResult {
 interface ApplyBacktestExecutionCostsParams {
   grossPnl: number;
   quantity: number;
+
+  /**
+   * Valor financeiro de 1 ponto do ativo, por contrato.
+   */
   moneyPerPoint: number;
+
+  /**
+   * Tamanho mínimo de variação do ativo em pontos.
+   *
+   * WIN: 5
+   * WDO: 0.5
+   */
+  tickSize: number;
+
   config: BacktestExecutionCostConfig;
 }
 
 function nonNegative(
   value: number,
 ): number {
-  return Math.max(0, value);
+  return Math.max(
+    0,
+    value,
+  );
 }
 
 export function applyBacktestExecutionCosts({
   grossPnl,
   quantity,
   moneyPerPoint,
+  tickSize,
   config,
 }: ApplyBacktestExecutionCostsParams): BacktestExecutionCostResult {
   const safeQuantity =
@@ -50,15 +67,24 @@ export function applyBacktestExecutionCosts({
       quantity,
     );
 
-  const slippagePointsPerSide =
+  const safeTickSize =
     nonNegative(
-      config.slippagePointsPerSide,
+      tickSize,
+    );
+
+  const slippageTicksPerSide =
+    nonNegative(
+      config.slippageTicksPerSide,
     );
 
   const fixedCostPerContractRoundTrip =
     nonNegative(
       config.fixedCostPerContractRoundTrip,
     );
+
+  const slippagePointsPerSide =
+    slippageTicksPerSide *
+    safeTickSize;
 
   const roundTripSlippagePoints =
     slippagePointsPerSide * 2;

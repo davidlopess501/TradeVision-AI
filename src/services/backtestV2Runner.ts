@@ -395,8 +395,8 @@ export async function runBacktestV2(
     config.strategyMode ?? 'BOTH';
 
   const executionCosts: BacktestExecutionCostConfig = {
-    slippagePointsPerSide:
-      config.executionCosts?.slippagePointsPerSide ?? 0,
+    slippageTicksPerSide:
+      config.executionCosts?.slippageTicksPerSide ?? 0,
     fixedCostPerContractRoundTrip:
       config.executionCosts?.fixedCostPerContractRoundTrip ?? 0,
   };
@@ -754,6 +754,8 @@ export async function runBacktestV2(
           risk.quantity,
         moneyPerPoint:
           assetMoneyPerPoint,
+        tickSize:
+          ASSETS[config.asset].tick,
         config:
           executionCosts,
       });
