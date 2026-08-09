@@ -266,7 +266,7 @@ export default function AnalysisScreen({
           provider.getCandles(
             asset,
             timeframe,
-            25000,
+            30000,
           ),
         ]);
 
@@ -484,11 +484,11 @@ export default function AnalysisScreen({
   async function handleRunBacktest() {
     const blockSize = 5000;
     const requiredCandles =
-      blockSize * 5;
+      blockSize * 6;
 
     if (candles.length < requiredCandles) {
       console.warn(
-        `[TradeVision] Validação A/B/C/D/E requer ${
+        `[TradeVision] Validação A/B/C/D/E/F requer ${
           requiredCandles
         } candles. Recebidos: ${candles.length}.`,
       );
@@ -515,35 +515,41 @@ export default function AnalysisScreen({
 
       const blockA =
         candles.slice(
+          candles.length - blockSize * 6,
+          candles.length - blockSize * 5,
+        );
+
+      const blockB =
+        candles.slice(
           candles.length - blockSize * 5,
           candles.length - blockSize * 4,
         );
 
-      const blockB =
+      const blockC =
         candles.slice(
           candles.length - blockSize * 4,
           candles.length - blockSize * 3,
         );
 
-      const blockC =
+      const blockD =
         candles.slice(
           candles.length - blockSize * 3,
           candles.length - blockSize * 2,
         );
 
-      const blockD =
+      const blockE =
         candles.slice(
           candles.length - blockSize * 2,
           candles.length - blockSize,
         );
 
-      const blockE =
+      const blockF =
         candles.slice(
           candles.length - blockSize,
         );
 
       console.group(
-        '[TradeVision] BUY_ONLY — VALIDAÇÃO A/B/C/D/E + STRESS TEST DE CUSTOS',
+        '[TradeVision] BUY_ONLY — VALIDAÇÃO A/B/C/D/E/F + STRESS TEST DE CUSTOS',
       );
 
       console.log(
@@ -573,6 +579,11 @@ export default function AnalysisScreen({
             candles: blockE.length,
             from: blockE[0]?.time,
             to: blockE[blockE.length - 1]?.time,
+          },
+          F: {
+            candles: blockF.length,
+            from: blockF[0]?.time,
+            to: blockF[blockF.length - 1]?.time,
           },
         },
       );
@@ -612,6 +623,9 @@ export default function AnalysisScreen({
         eZero,
         eLight,
         eModerate,
+        fZero,
+        fLight,
+        fModerate,
       ] = await Promise.all([
         runBlock(blockA, costScenarios.ZERO),
         runBlock(blockA, costScenarios.LEVE),
@@ -632,6 +646,10 @@ export default function AnalysisScreen({
         runBlock(blockE, costScenarios.ZERO),
         runBlock(blockE, costScenarios.LEVE),
         runBlock(blockE, costScenarios.MODERADO),
+
+        runBlock(blockF, costScenarios.ZERO),
+        runBlock(blockF, costScenarios.LEVE),
+        runBlock(blockF, costScenarios.MODERADO),
       ]);
 
       const row = (
@@ -664,12 +682,16 @@ export default function AnalysisScreen({
         'E — ZERO': row(eZero),
         'E — LEVE': row(eLight),
         'E — MODERADO': row(eModerate),
+
+        'F — ZERO': row(fZero),
+        'F — LEVE': row(fLight),
+        'F — MODERADO': row(fModerate),
       });
 
       console.groupEnd();
 
       setBacktestResult(
-        eModerate,
+        fModerate,
       );
     } finally {
       setBacktestLoading(false);
