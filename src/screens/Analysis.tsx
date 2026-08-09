@@ -266,7 +266,7 @@ export default function AnalysisScreen({
           provider.getCandles(
             asset,
             timeframe,
-            15000,
+            25000,
           ),
         ]);
 
@@ -484,11 +484,11 @@ export default function AnalysisScreen({
   async function handleRunBacktest() {
     const blockSize = 5000;
     const requiredCandles =
-      blockSize * 3;
+      blockSize * 5;
 
     if (candles.length < requiredCandles) {
       console.warn(
-        `[TradeVision] Validação A/B/C requer ${
+        `[TradeVision] Validação A/B/C/D/E requer ${
           requiredCandles
         } candles. Recebidos: ${candles.length}.`,
       );
@@ -498,32 +498,6 @@ export default function AnalysisScreen({
     setBacktestLoading(true);
 
     try {
-      /*
-       * BUY_ONLY — validação em 3 blocos independentes.
-       *
-       * A = desenvolvimento
-       * B = validação
-       * C = confirmação
-       *
-       * Cada bloco contém 5.000 candles e não se sobrepõe.
-       *
-       * Stress test de custos:
-       *
-       * ZERO:
-       * - 0 ticks de slippage por lado
-       * - R$ 0,00 de custo fixo por contrato / round trip
-       *
-       * LEVE:
-       * - 1 tick de slippage por lado
-       * - R$ 0,50 de custo fixo por contrato / round trip
-       *
-       * MODERADO:
-       * - 2 ticks de slippage por lado
-       * - R$ 1,00 de custo fixo por contrato / round trip
-       *
-       * Esses valores são cenários configuráveis de stress,
-       * não uma afirmação de custos oficiais de corretora/B3.
-       */
       const costScenarios = {
         ZERO: {
           slippageTicksPerSide: 0,
@@ -539,59 +513,66 @@ export default function AnalysisScreen({
         },
       } as const;
 
-      const developmentCandles =
+      const blockA =
+        candles.slice(
+          candles.length - blockSize * 5,
+          candles.length - blockSize * 4,
+        );
+
+      const blockB =
+        candles.slice(
+          candles.length - blockSize * 4,
+          candles.length - blockSize * 3,
+        );
+
+      const blockC =
         candles.slice(
           candles.length - blockSize * 3,
           candles.length - blockSize * 2,
         );
 
-      const validationCandles =
+      const blockD =
         candles.slice(
           candles.length - blockSize * 2,
           candles.length - blockSize,
         );
 
-      const confirmationCandles =
+      const blockE =
         candles.slice(
           candles.length - blockSize,
         );
 
       console.group(
-        '[TradeVision] BUY_ONLY — VALIDAÇÃO A/B/C + STRESS TEST DE CUSTOS',
+        '[TradeVision] BUY_ONLY — VALIDAÇÃO A/B/C/D/E + STRESS TEST DE CUSTOS',
       );
 
       console.log(
         '[TradeVision] Blocos',
         {
           A: {
-            candles:
-              developmentCandles.length,
-            from:
-              developmentCandles[0]?.time,
-            to:
-              developmentCandles[
-                developmentCandles.length - 1
-              ]?.time,
+            candles: blockA.length,
+            from: blockA[0]?.time,
+            to: blockA[blockA.length - 1]?.time,
           },
           B: {
-            candles:
-              validationCandles.length,
-            from:
-              validationCandles[0]?.time,
-            to:
-              validationCandles[
-                validationCandles.length - 1
-              ]?.time,
+            candles: blockB.length,
+            from: blockB[0]?.time,
+            to: blockB[blockB.length - 1]?.time,
           },
           C: {
-            candles:
-              confirmationCandles.length,
-            from:
-              confirmationCandles[0]?.time,
-            to:
-              confirmationCandles[
-                confirmationCandles.length - 1
-              ]?.time,
+            candles: blockC.length,
+            from: blockC[0]?.time,
+            to: blockC[blockC.length - 1]?.time,
+          },
+          D: {
+            candles: blockD.length,
+            from: blockD[0]?.time,
+            to: blockD[blockD.length - 1]?.time,
+          },
+          E: {
+            candles: blockE.length,
+            from: blockE[0]?.time,
+            to: blockE[blockE.length - 1]?.time,
           },
         },
       );
@@ -601,215 +582,94 @@ export default function AnalysisScreen({
         costScenarios,
       );
 
-      const developmentZero =
-        await runBacktestV2({
+      async function runBlock(
+        blockCandles: Candle[],
+        executionCosts: (typeof costScenarios)[keyof typeof costScenarios],
+      ) {
+        return runBacktestV2({
           asset,
           timeframe,
           initialCapital: 10000,
-          candles: developmentCandles,
+          candles: blockCandles,
           strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.ZERO,
+          executionCosts,
         });
+      }
 
-      const developmentLight =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: developmentCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.LEVE,
-        });
+      const [
+        aZero,
+        aLight,
+        aModerate,
+        bZero,
+        bLight,
+        bModerate,
+        cZero,
+        cLight,
+        cModerate,
+        dZero,
+        dLight,
+        dModerate,
+        eZero,
+        eLight,
+        eModerate,
+      ] = await Promise.all([
+        runBlock(blockA, costScenarios.ZERO),
+        runBlock(blockA, costScenarios.LEVE),
+        runBlock(blockA, costScenarios.MODERADO),
 
-      const developmentModerate =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: developmentCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.MODERADO,
-        });
+        runBlock(blockB, costScenarios.ZERO),
+        runBlock(blockB, costScenarios.LEVE),
+        runBlock(blockB, costScenarios.MODERADO),
 
-      const validationZero =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: validationCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.ZERO,
-        });
+        runBlock(blockC, costScenarios.ZERO),
+        runBlock(blockC, costScenarios.LEVE),
+        runBlock(blockC, costScenarios.MODERADO),
 
-      const validationLight =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: validationCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.LEVE,
-        });
+        runBlock(blockD, costScenarios.ZERO),
+        runBlock(blockD, costScenarios.LEVE),
+        runBlock(blockD, costScenarios.MODERADO),
 
-      const validationModerate =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: validationCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.MODERADO,
-        });
+        runBlock(blockE, costScenarios.ZERO),
+        runBlock(blockE, costScenarios.LEVE),
+        runBlock(blockE, costScenarios.MODERADO),
+      ]);
 
-      const confirmationZero =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: confirmationCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.ZERO,
-        });
-
-      const confirmationLight =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: confirmationCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.LEVE,
-        });
-
-      const confirmationModerate =
-        await runBacktestV2({
-          asset,
-          timeframe,
-          initialCapital: 10000,
-          candles: confirmationCandles,
-          strategyMode: 'BUY_ONLY',
-          executionCosts: costScenarios.MODERADO,
-        });
+      const row = (
+        result: BacktestResult,
+      ) => ({
+        trades: result.totalTrades,
+        winRate: result.winRate,
+        netProfit: result.netProfit,
+        profitFactor: result.profitFactor,
+        maxDrawdown: result.maxDrawdown,
+      });
 
       console.table({
-        'A — ZERO': {
-          trades:
-            developmentZero.totalTrades,
-          winRate:
-            developmentZero.winRate,
-          netProfit:
-            developmentZero.netProfit,
-          profitFactor:
-            developmentZero.profitFactor,
-          maxDrawdown:
-            developmentZero.maxDrawdown,
-        },
-        'A — LEVE': {
-          trades:
-            developmentLight.totalTrades,
-          winRate:
-            developmentLight.winRate,
-          netProfit:
-            developmentLight.netProfit,
-          profitFactor:
-            developmentLight.profitFactor,
-          maxDrawdown:
-            developmentLight.maxDrawdown,
-        },
-        'A — MODERADO': {
-          trades:
-            developmentModerate.totalTrades,
-          winRate:
-            developmentModerate.winRate,
-          netProfit:
-            developmentModerate.netProfit,
-          profitFactor:
-            developmentModerate.profitFactor,
-          maxDrawdown:
-            developmentModerate.maxDrawdown,
-        },
-        'B — ZERO': {
-          trades:
-            validationZero.totalTrades,
-          winRate:
-            validationZero.winRate,
-          netProfit:
-            validationZero.netProfit,
-          profitFactor:
-            validationZero.profitFactor,
-          maxDrawdown:
-            validationZero.maxDrawdown,
-        },
-        'B — LEVE': {
-          trades:
-            validationLight.totalTrades,
-          winRate:
-            validationLight.winRate,
-          netProfit:
-            validationLight.netProfit,
-          profitFactor:
-            validationLight.profitFactor,
-          maxDrawdown:
-            validationLight.maxDrawdown,
-        },
-        'B — MODERADO': {
-          trades:
-            validationModerate.totalTrades,
-          winRate:
-            validationModerate.winRate,
-          netProfit:
-            validationModerate.netProfit,
-          profitFactor:
-            validationModerate.profitFactor,
-          maxDrawdown:
-            validationModerate.maxDrawdown,
-        },
-        'C — ZERO': {
-          trades:
-            confirmationZero.totalTrades,
-          winRate:
-            confirmationZero.winRate,
-          netProfit:
-            confirmationZero.netProfit,
-          profitFactor:
-            confirmationZero.profitFactor,
-          maxDrawdown:
-            confirmationZero.maxDrawdown,
-        },
-        'C — LEVE': {
-          trades:
-            confirmationLight.totalTrades,
-          winRate:
-            confirmationLight.winRate,
-          netProfit:
-            confirmationLight.netProfit,
-          profitFactor:
-            confirmationLight.profitFactor,
-          maxDrawdown:
-            confirmationLight.maxDrawdown,
-        },
-        'C — MODERADO': {
-          trades:
-            confirmationModerate.totalTrades,
-          winRate:
-            confirmationModerate.winRate,
-          netProfit:
-            confirmationModerate.netProfit,
-          profitFactor:
-            confirmationModerate.profitFactor,
-          maxDrawdown:
-            confirmationModerate.maxDrawdown,
-        },
+        'A — ZERO': row(aZero),
+        'A — LEVE': row(aLight),
+        'A — MODERADO': row(aModerate),
+
+        'B — ZERO': row(bZero),
+        'B — LEVE': row(bLight),
+        'B — MODERADO': row(bModerate),
+
+        'C — ZERO': row(cZero),
+        'C — LEVE': row(cLight),
+        'C — MODERADO': row(cModerate),
+
+        'D — ZERO': row(dZero),
+        'D — LEVE': row(dLight),
+        'D — MODERADO': row(dModerate),
+
+        'E — ZERO': row(eZero),
+        'E — LEVE': row(eLight),
+        'E — MODERADO': row(eModerate),
       });
 
       console.groupEnd();
 
-      /*
-       * O painel mostra o Bloco C no cenário MODERADO,
-       * pois ele é o teste de confirmação mais importante.
-       */
       setBacktestResult(
-        confirmationModerate,
+        eModerate,
       );
     } finally {
       setBacktestLoading(false);
