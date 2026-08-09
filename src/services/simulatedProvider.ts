@@ -55,7 +55,11 @@ function mulberry32(seed: number) {
 function hashStr(value: string): number {
   let hash = 2166136261;
 
-  for (let index = 0; index < value.length; index += 1) {
+  for (
+    let index = 0;
+    index < value.length;
+    index += 1
+  ) {
     hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 16777619);
   }
@@ -70,8 +74,18 @@ function uid(): string {
   );
 }
 
+function roundToTick(
+  value: number,
+  tick: number,
+): number {
+  return Math.max(
+    tick,
+    Math.round(value / tick) * tick,
+  );
+}
+
 export class SimulatedMarketDataProvider
-  implements IMarketDataProvider
+implements IMarketDataProvider
 {
   readonly name = 'Simulado';
 
@@ -80,14 +94,19 @@ export class SimulatedMarketDataProvider
 
     const rng = mulberry32(
       hashStr(
-        `${asset}-quote-${Math.floor(Date.now() / 60000)}`,
+        `${asset}-quote-${Math.floor(
+          Date.now() / 60000,
+        )}`,
       ),
     );
 
     const drift =
-      (rng() - 0.5) * info.basePrice * 0.004;
+      (rng() - 0.5) *
+      info.basePrice *
+      0.004;
 
-    const price = info.basePrice + drift;
+    const price =
+      info.basePrice + drift;
 
     const open =
       price -
@@ -97,16 +116,21 @@ export class SimulatedMarketDataProvider
 
     const high =
       Math.max(price, open) +
-      rng() * info.basePrice * 0.0014;
+      rng() *
+        info.basePrice *
+        0.0014;
 
     const low =
       Math.min(price, open) -
-      rng() * info.basePrice * 0.0014;
+      rng() *
+        info.basePrice *
+        0.0014;
 
     return {
       asset,
       price,
-      changePct: ((price - open) / open) * 100,
+      changePct:
+        ((price - open) / open) * 100,
       high,
       low,
       open,
@@ -127,7 +151,9 @@ export class SimulatedMarketDataProvider
       if (!active) return;
 
       try {
-        callback(await this.getQuote(asset));
+        callback(
+          await this.getQuote(asset),
+        );
       } catch {
         // Evita derrubar a interface.
       }
@@ -135,7 +161,11 @@ export class SimulatedMarketDataProvider
 
     void update();
 
-    const interval = window.setInterval(update, 4000);
+    const interval =
+      window.setInterval(
+        update,
+        4000,
+      );
 
     return () => {
       active = false;
@@ -152,20 +182,57 @@ export class SimulatedMarketDataProvider
 
     const timeframeMinutes =
       TIMEFRAMES.find(
-        (item) => item.value === timeframe,
+        (item) =>
+          item.value === timeframe,
       )?.minutes ?? 1;
 
+    /*
+     * Seed determinística:
+     * repetir o mesmo ativo/timeframe produz
+     * exatamente a mesma série sintética.
+     */
     const rng = mulberry32(
-      hashStr(`${asset}-${timeframe}-candles`),
+      hashStr(
+        `${asset}-${timeframe}-candles-gap-stress-v1`,
+      ),
     );
 
     const now = Date.now();
-    const candleDuration = timeframeMinutes * 60000;
+    const candleDuration =
+      timeframeMinutes * 60000;
 
-    let price =
-      info.basePrice * (0.995 + rng() * 0.01);
+    let previousClose =
+      roundToTick(
+        info.basePrice *
+          (0.995 + rng() * 0.01),
+        info.tick,
+      );
 
-    const volatility = info.basePrice * 0.0012;
+    /*
+     * Movimento intrabar original.
+     */
+    const volatility =
+      info.basePrice * 0.0012;
+
+    /*
+     * STRESS DE GAP
+     *
+     * Em aproximadamente 18% dos candles,
+     * a abertura não será igual ao fechamento
+     * anterior.
+     *
+     * O tamanho máximo do gap é proporcional
+     * ao ativo e permanece determinístico.
+     *
+     * Isso NÃO tenta reproduzir fielmente a B3.
+     * É um cenário sintético para testar se o
+     * backtest depende de execução perfeita.
+     */
+    const gapProbability = 0.18;
+
+    const maxGap =
+      info.basePrice * 0.00035;
+
     const candles: Candle[] = [];
 
     for (
@@ -173,32 +240,83 @@ export class SimulatedMarketDataProvider
       index >= 0;
       index -= 1
     ) {
-      const open = price;
-      const change = (rng() - 0.48) * volatility;
-      const close = Math.max(info.tick, open + change);
+      const hasGap =
+        rng() < gapProbability;
+
+      const rawGap =
+        hasGap
+          ? (rng() - 0.5) *
+            2 *
+            maxGap
+          : 0;
+
+      const open =
+        roundToTick(
+          previousClose + rawGap,
+          info.tick,
+        );
+
+      const change =
+        (rng() - 0.48) *
+        volatility;
+
+      const close =
+        roundToTick(
+          Math.max(
+            info.tick,
+            open + change,
+          ),
+          info.tick,
+        );
 
       const high =
-        Math.max(open, close) +
-        rng() * volatility * 0.6;
+        roundToTick(
+          Math.max(open, close) +
+            rng() *
+              volatility *
+              0.6,
+          info.tick,
+        );
 
       const low =
-        Math.min(open, close) -
-        rng() * volatility * 0.6;
+        roundToTick(
+          Math.max(
+            info.tick,
+            Math.min(open, close) -
+              rng() *
+                volatility *
+                0.6,
+          ),
+          info.tick,
+        );
 
-      const volume = Math.round(
-        500 + rng() * 4500,
-      );
+      const volume =
+        Math.round(
+          500 + rng() * 4500,
+        );
 
       candles.push({
-        time: now - index * candleDuration,
+        time:
+          now -
+          index * candleDuration,
         open,
-        high,
-        low,
+        high:
+          Math.max(
+            high,
+            open,
+            close,
+          ),
+        low:
+          Math.min(
+            low,
+            open,
+            close,
+          ),
         close,
         volume,
       });
 
-      price = close;
+      previousClose = close;
     }
 
     return candles;
@@ -208,13 +326,15 @@ export class SimulatedMarketDataProvider
     asset: Asset,
     timeframe: Timeframe,
   ): Promise<IndicatorResult[]> {
-    const quote = await this.getQuote(asset);
+    const quote =
+      await this.getQuote(asset);
 
-    const candles = await this.getCandles(
-      asset,
-      timeframe,
-      120,
-    );
+    const candles =
+      await this.getCandles(
+        asset,
+        timeframe,
+        120,
+      );
 
     const rng = mulberry32(
       hashStr(
@@ -224,60 +344,73 @@ export class SimulatedMarketDataProvider
       ),
     );
 
-    const realIndicators: IndicatorResult[] = [
-      ...buildRealEmaIndicators(
-        candles,
-        ASSETS[asset].decimals,
-      ),
-      buildRealRsiIndicator(candles),
-      buildRealMacdIndicator(
-        candles,
-        ASSETS[asset].decimals,
-      ),
-      buildRealVolumeIndicator(candles),
-      buildRealAtrIndicator(
-        candles,
-        ASSETS[asset].decimals,
-      ),
-    ];
+    const realIndicators:
+      IndicatorResult[] = [
+        ...buildRealEmaIndicators(
+          candles,
+          ASSETS[asset].decimals,
+        ),
+        buildRealRsiIndicator(
+          candles,
+        ),
+        buildRealMacdIndicator(
+          candles,
+          ASSETS[asset].decimals,
+        ),
+        buildRealVolumeIndicator(
+          candles,
+        ),
+        buildRealAtrIndicator(
+          candles,
+          ASSETS[asset].decimals,
+        ),
+      ];
 
-    return INDICATOR_META.map((meta) => {
-      const realIndicator = realIndicators.find(
-        (indicator) => indicator.key === meta.key,
-      );
+    return INDICATOR_META.map(
+      (meta) => {
+        const realIndicator =
+          realIndicators.find(
+            (indicator) =>
+              indicator.key ===
+              meta.key,
+          );
 
-      if (realIndicator) {
-        return realIndicator;
-      }
+        if (realIndicator) {
+          return realIndicator;
+        }
 
-      return buildIndicator(
-        meta.key,
-        rng,
-        asset,
-        quote.price,
-        ASSETS[asset].decimals,
-      );
-    });
+        return buildIndicator(
+          meta.key,
+          rng,
+          asset,
+          quote.price,
+          ASSETS[asset].decimals,
+        );
+      },
+    );
   }
 
   async analyze(
     asset: Asset,
     timeframe: Timeframe,
   ): Promise<AnalysisResult> {
-    const quote = await this.getQuote(asset);
+    const quote =
+      await this.getQuote(asset);
 
-    const indicators = await this.getIndicators(
-      asset,
-      timeframe,
-    );
+    const indicators =
+      await this.getIndicators(
+        asset,
+        timeframe,
+      );
 
-    const analysis = finalizeAnalysis(
-      asset,
-      timeframe,
-      indicators,
-      quote,
-      formatPrice,
-    );
+    const analysis =
+      finalizeAnalysis(
+        asset,
+        timeframe,
+        indicators,
+        quote,
+        formatPrice,
+      );
 
     return {
       ...analysis,
