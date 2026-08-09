@@ -516,15 +516,15 @@ export default function AnalysisScreen({
        */
       const costScenarios = {
         ZERO: {
-          slippagePointsPerSide: 0,
+          slippageTicksPerSide: 0,
           fixedCostPerContractRoundTrip: 0,
         },
         LEVE: {
-          slippagePointsPerSide: 1,
+          slippageTicksPerSide: 1,
           fixedCostPerContractRoundTrip: 0.5,
         },
         MODERADO: {
-          slippagePointsPerSide: 2,
+          slippageTicksPerSide: 2,
           fixedCostPerContractRoundTrip: 1,
         },
       } as const;
