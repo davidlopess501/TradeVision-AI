@@ -757,6 +757,37 @@ export async function runBacktestV2(
         nextCandle.open,
       );
 
+    console.log(
+      '[TradeVision] EXECUTION GAP CHECK',
+      {
+        asset: config.asset,
+        timeframe: config.timeframe,
+        side: preparedOrder.side,
+
+        signalIndex: index,
+        executionIndex: index + 1,
+
+        signalClose:
+          config.candles[index].close,
+
+        nextOpen:
+          nextCandle.open,
+
+        gap:
+          nextCandle.open -
+          config.candles[index].close,
+
+        entryUsed:
+          executionLevels.entry,
+
+        stopUsed:
+          executionLevels.stop,
+
+        targetUsed:
+          executionLevels.target,
+      },
+    );
+
     const exitResult =
       simulateBacktestExit({
         side:
