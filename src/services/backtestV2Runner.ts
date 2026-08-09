@@ -363,6 +363,38 @@ function moneyPerPoint(
   );
 }
 
+function rebaseOrderToNextOpen(
+  side: 'BUY' | 'SELL',
+  originalEntry: number,
+  originalStop: number,
+  originalTarget: number,
+  nextOpen: number,
+): {
+  entry: number;
+  stop: number;
+  target: number;
+} {
+  const stopDistance =
+    Math.abs(originalEntry - originalStop);
+
+  const targetDistance =
+    Math.abs(originalTarget - originalEntry);
+
+  if (side === 'BUY') {
+    return {
+      entry: nextOpen,
+      stop: nextOpen - stopDistance,
+      target: nextOpen + targetDistance,
+    };
+  }
+
+  return {
+    entry: nextOpen,
+    stop: nextOpen + stopDistance,
+    target: nextOpen - targetDistance,
+  };
+}
+
 function countReason(
   map: Record<string, number>,
   reason: string,
@@ -708,14 +740,31 @@ export async function runBacktestV2(
 
     diagnostics.riskApproved += 1;
 
+    /*
+     * Execução realista:
+     * o sinal é confirmado no fechamento do candle atual,
+     * mas a entrada só acontece no OPEN do candle seguinte.
+     *
+     * As distâncias originais de stop e target são preservadas
+     * e reposicionadas a partir do preço real de entrada.
+     */
+    const executionLevels =
+      rebaseOrderToNextOpen(
+        preparedOrder.side,
+        preparedOrder.entry,
+        preparedOrder.stop,
+        preparedOrder.target,
+        nextCandle.open,
+      );
+
     const exitResult =
       simulateBacktestExit({
         side:
           preparedOrder.side,
         stop:
-          preparedOrder.stop,
+          executionLevels.stop,
         target:
-          preparedOrder.target,
+          executionLevels.target,
         candles:
           config.candles,
         startIndex:
@@ -727,7 +776,7 @@ export async function runBacktestV2(
     }
 
     const entry =
-      preparedOrder.entry;
+      executionLevels.entry;
 
     const exit =
       exitResult.exitPrice;
@@ -771,7 +820,7 @@ export async function runBacktestV2(
       exit,
       pnl,
       openedAt:
-        config.candles[index].time,
+        nextCandle.time,
       closedAt:
         exitResult.closedAt,
     });
