@@ -509,9 +509,22 @@ export default function AnalysisScreen({
       const realCandles =
         WIN_15M_REAL_CANDLES;
 
-      if (realCandles.length < 360) {
+      /*
+       * WALK-FORWARD REAL
+       *
+       * Dividimos o histórico real em janelas cronológicas
+       * consecutivas, sem sobreposição.
+       *
+       * A estratégia NÃO é recalibrada entre as janelas.
+       * O objetivo é apenas medir estabilidade temporal.
+       */
+      const windowSize = 500;
+
+      if (realCandles.length < windowSize * 3) {
         console.warn(
-          `[TradeVision] WIN 15m REAL requer pelo menos 360 candles. Recebidos: ${realCandles.length}.`,
+          `[TradeVision] Walk-forward real requer pelo menos ${
+            windowSize * 3
+          } candles. Recebidos: ${realCandles.length}.`,
         );
         return;
       }
@@ -519,30 +532,31 @@ export default function AnalysisScreen({
       setBacktestLoading(true);
 
       try {
-        const baseBlockSize =
-          Math.floor(
-            realCandles.length / 3,
-          );
+        const windows: Candle[][] = [];
 
-        const blockA =
-          realCandles.slice(
-            0,
-            baseBlockSize,
-          );
+        for (
+          let startIndex = 0;
+          startIndex < realCandles.length;
+          startIndex += windowSize
+        ) {
+          const windowCandles =
+            realCandles.slice(
+              startIndex,
+              Math.min(
+                startIndex + windowSize,
+                realCandles.length,
+              ),
+            );
 
-        const blockB =
-          realCandles.slice(
-            baseBlockSize,
-            baseBlockSize * 2,
-          );
-
-        const blockC =
-          realCandles.slice(
-            baseBlockSize * 2,
-          );
+          if (windowCandles.length >= 360) {
+            windows.push(
+              windowCandles,
+            );
+          }
+        }
 
         console.group(
-          '[TradeVision] WIN 15m REAL — VALIDAÇÃO A/B/C + STRESS TEST DE CUSTOS',
+          '[TradeVision] WIN 15m REAL — WALK-FORWARD + STRESS TEST DE CUSTOS',
         );
 
         console.log(
@@ -554,132 +568,290 @@ export default function AnalysisScreen({
               'Toro Trader — OHLC real',
             totalCandles:
               realCandles.length,
+            windowSize,
+            validWindows:
+              windows.length,
             volume:
               'INDISPONÍVEL — mantido neutro, sem dados inventados',
           },
         );
 
         console.log(
-          '[TradeVision] Blocos reais',
-          {
-            A: {
-              candles:
-                blockA.length,
-              from:
-                blockA[0]?.time,
-              to:
-                blockA[
-                  blockA.length - 1
-                ]?.time,
-            },
-            B: {
-              candles:
-                blockB.length,
-              from:
-                blockB[0]?.time,
-              to:
-                blockB[
-                  blockB.length - 1
-                ]?.time,
-            },
-            C: {
-              candles:
-                blockC.length,
-              from:
-                blockC[0]?.time,
-              to:
-                blockC[
-                  blockC.length - 1
-                ]?.time,
-            },
-          },
+          '[TradeVision] Janelas',
+          Object.fromEntries(
+            windows.map(
+              (
+                windowCandles,
+                windowIndex,
+              ) => [
+                `W${windowIndex + 1}`,
+                {
+                  candles:
+                    windowCandles.length,
+                  from:
+                    windowCandles[0]?.time,
+                  to:
+                    windowCandles[
+                      windowCandles.length - 1
+                    ]?.time,
+                },
+              ],
+            ),
+          ),
         );
 
-        console.log(
-          '[TradeVision] Cenários',
-          costScenarios,
-        );
-
-        async function runRealBlock(
-          blockCandles: Candle[],
+        async function runRealWindow(
+          windowCandles: Candle[],
           executionCosts: (typeof costScenarios)[keyof typeof costScenarios],
         ) {
           return runBacktestV2({
             asset: 'WIN',
             timeframe: '15m',
             initialCapital: 10000,
-            candles: blockCandles,
+            candles: windowCandles,
             strategyMode: 'BUY_ONLY',
             executionCosts,
           });
         }
 
-        const [
-          aZero,
-          aLight,
-          aModerate,
-          bZero,
-          bLight,
-          bModerate,
-          cZero,
-          cLight,
-          cModerate,
-        ] = await Promise.all([
-          runRealBlock(blockA, costScenarios.ZERO),
-          runRealBlock(blockA, costScenarios.LEVE),
-          runRealBlock(blockA, costScenarios.MODERADO),
+        const rows:
+          Record<
+            string,
+            {
+              trades: number;
+              winRate: number;
+              netProfit: number;
+              profitFactor: number;
+              maxDrawdown: number;
+            }
+          > = {};
 
-          runRealBlock(blockB, costScenarios.ZERO),
-          runRealBlock(blockB, costScenarios.LEVE),
-          runRealBlock(blockB, costScenarios.MODERADO),
+        const moderateResults:
+          BacktestResult[] = [];
 
-          runRealBlock(blockC, costScenarios.ZERO),
-          runRealBlock(blockC, costScenarios.LEVE),
-          runRealBlock(blockC, costScenarios.MODERADO),
-        ]);
+        for (
+          let windowIndex = 0;
+          windowIndex < windows.length;
+          windowIndex += 1
+        ) {
+          const windowCandles =
+            windows[windowIndex];
 
-        const row = (
-          result: BacktestResult,
-        ) => ({
-          trades:
-            result.totalTrades,
-          winRate:
-            result.winRate,
-          netProfit:
-            result.netProfit,
-          profitFactor:
-            result.profitFactor,
-          maxDrawdown:
-            result.maxDrawdown,
-        });
+          const [
+            zero,
+            light,
+            moderate,
+          ] = await Promise.all([
+            runRealWindow(
+              windowCandles,
+              costScenarios.ZERO,
+            ),
+            runRealWindow(
+              windowCandles,
+              costScenarios.LEVE,
+            ),
+            runRealWindow(
+              windowCandles,
+              costScenarios.MODERADO,
+            ),
+          ]);
+
+          moderateResults.push(
+            moderate,
+          );
+
+          const row = (
+            result: BacktestResult,
+          ) => ({
+            trades:
+              result.totalTrades,
+            winRate:
+              result.winRate,
+            netProfit:
+              result.netProfit,
+            profitFactor:
+              result.profitFactor,
+            maxDrawdown:
+              result.maxDrawdown,
+          });
+
+          rows[
+            `W${windowIndex + 1} — ZERO`
+          ] = row(zero);
+
+          rows[
+            `W${windowIndex + 1} — LEVE`
+          ] = row(light);
+
+          rows[
+            `W${windowIndex + 1} — MODERADO`
+          ] = row(moderate);
+        }
+
+        console.table(
+          rows,
+        );
+
+        const positiveModerate =
+          moderateResults.filter(
+            (result) =>
+              result.netProfit > 0,
+          );
+
+        const negativeModerate =
+          moderateResults.filter(
+            (result) =>
+              result.netProfit < 0,
+          );
+
+        const flatModerate =
+          moderateResults.filter(
+            (result) =>
+              result.netProfit === 0,
+          );
+
+        const totalModerateProfit =
+          moderateResults.reduce(
+            (
+              total,
+              result,
+            ) =>
+              total +
+              result.netProfit,
+            0,
+          );
+
+        const totalModerateTrades =
+          moderateResults.reduce(
+            (
+              total,
+              result,
+            ) =>
+              total +
+              result.totalTrades,
+            0,
+          );
+
+        const bestWindow =
+          moderateResults.reduce(
+            (
+              best,
+              result,
+              index,
+            ) => {
+              if (
+                !best ||
+                result.netProfit >
+                  best.result.netProfit
+              ) {
+                return {
+                  index,
+                  result,
+                };
+              }
+
+              return best;
+            },
+            null as
+              | {
+                  index: number;
+                  result: BacktestResult;
+                }
+              | null,
+          );
+
+        const worstWindow =
+          moderateResults.reduce(
+            (
+              worst,
+              result,
+              index,
+            ) => {
+              if (
+                !worst ||
+                result.netProfit <
+                  worst.result.netProfit
+              ) {
+                return {
+                  index,
+                  result,
+                };
+              }
+
+              return worst;
+            },
+            null as
+              | {
+                  index: number;
+                  result: BacktestResult;
+                }
+              | null,
+          );
+
+        const worstDrawdown =
+          moderateResults.reduce(
+            (
+              max,
+              result,
+            ) =>
+              Math.max(
+                max,
+                result.maxDrawdown,
+              ),
+            0,
+          );
+
+        const positiveRate =
+          moderateResults.length > 0
+            ? (
+                positiveModerate.length /
+                moderateResults.length
+              ) * 100
+            : 0;
 
         console.table({
-          'A REAL — ZERO':
-            row(aZero),
-          'A REAL — LEVE':
-            row(aLight),
-          'A REAL — MODERADO':
-            row(aModerate),
-
-          'B REAL — ZERO':
-            row(bZero),
-          'B REAL — LEVE':
-            row(bLight),
-          'B REAL — MODERADO':
-            row(bModerate),
-
-          'C REAL — ZERO':
-            row(cZero),
-          'C REAL — LEVE':
-            row(cLight),
-          'C REAL — MODERADO':
-            row(cModerate),
+          'WALK-FORWARD MODERADO': {
+            windows:
+              moderateResults.length,
+            positiveWindows:
+              positiveModerate.length,
+            negativeWindows:
+              negativeModerate.length,
+            flatWindows:
+              flatModerate.length,
+            positiveRate,
+            totalTrades:
+              totalModerateTrades,
+            totalNetProfit:
+              totalModerateProfit,
+            worstDrawdown,
+            bestWindow:
+              bestWindow
+                ? `W${bestWindow.index + 1}`
+                : '—',
+            bestNetProfit:
+              bestWindow?.result
+                .netProfit ?? 0,
+            worstWindow:
+              worstWindow
+                ? `W${worstWindow.index + 1}`
+                : '—',
+            worstNetProfit:
+              worstWindow?.result
+                .netProfit ?? 0,
+          },
         });
 
         console.groupEnd();
 
+        /*
+         * O painel mostra a janela MODERADA mais recente.
+         * O resumo completo permanece no console.
+         */
         setBacktestResult(
-          cModerate,
+          moderateResults[
+            moderateResults.length - 1
+          ] ?? null,
         );
       } finally {
         setBacktestLoading(false);
@@ -688,6 +860,10 @@ export default function AnalysisScreen({
       return;
     }
 
+    /*
+     * Para os demais ativos/timeframes,
+     * preservamos a validação sintética A/B/C/D/E/F.
+     */
     const blockSize = 5000;
     const requiredCandles =
       blockSize * 6;
