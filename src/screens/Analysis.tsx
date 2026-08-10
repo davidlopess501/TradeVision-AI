@@ -845,13 +845,101 @@ export default function AnalysisScreen({
         console.groupEnd();
 
         /*
-         * O painel mostra a janela MODERADA mais recente.
-         * O resumo completo permanece no console.
+         * DIAGNÓSTICO FINAL LIMPO
+         *
+         * O walk-forward acima continua sendo executado normalmente,
+         * mas limpamos o console antes da execução final para evitar
+         * dezenas de diagnósticos repetidos.
+         *
+         * Em seguida rodamos UMA vez todo o histórico real do WIN 15m
+         * com custos MODERADOS. O backtestV2Runner imprime os diagnósticos
+         * BUY (score/confidence, indicadores e momentum) somente desta
+         * execução final.
+         */
+        console.clear();
+
+        console.group(
+          '[TradeVision] WIN15 REAL BUY DIAGNOSTIC FINAL',
+        );
+
+        console.log(
+          '[TradeVision] IMPORTANTE — os diagnósticos BUY abaixo pertencem ao histórico real completo, cenário MODERADO.',
+        );
+
+        const fullHistoryModerate =
+          await runBacktestV2({
+            asset: 'WIN',
+            timeframe: '15m',
+            initialCapital: 10000,
+            candles: realCandles,
+            strategyMode: 'BUY_ONLY',
+            executionCosts:
+              costScenarios.MODERADO,
+          });
+
+        console.table({
+          'WIN15 REAL — MODERADO': {
+            candles:
+              realCandles.length,
+            trades:
+              fullHistoryModerate.totalTrades,
+            winRate:
+              fullHistoryModerate.winRate,
+            netProfit:
+              fullHistoryModerate.netProfit,
+            profitFactor:
+              fullHistoryModerate.profitFactor,
+            maxDrawdown:
+              fullHistoryModerate.maxDrawdown,
+          },
+        });
+
+        console.log(
+          '[TradeVision] WALK-FORWARD MODERADO — RESUMO FINAL',
+          {
+            windows:
+              moderateResults.length,
+            positiveWindows:
+              positiveModerate.length,
+            negativeWindows:
+              negativeModerate.length,
+            flatWindows:
+              flatModerate.length,
+            positiveRate,
+            totalTrades:
+              totalModerateTrades,
+            totalNetProfit:
+              totalModerateProfit,
+            worstDrawdown,
+            bestWindow:
+              bestWindow
+                ? `W${bestWindow.index + 1}`
+                : '—',
+            bestNetProfit:
+              bestWindow?.result
+                .netProfit ?? 0,
+            worstWindow:
+              worstWindow
+                ? `W${worstWindow.index + 1}`
+                : '—',
+            worstNetProfit:
+              worstWindow?.result
+                .netProfit ?? 0,
+          },
+        );
+
+        console.log(
+          '[TradeVision] FIM WIN15 REAL BUY DIAGNOSTIC FINAL',
+        );
+
+        console.groupEnd();
+
+        /*
+         * O painel agora mostra o resultado do histórico real completo
+         * no cenário MODERADO.
          */
         setBacktestResult(
-          moderateResults[
-            moderateResults.length - 1
-          ] ?? null,
+          fullHistoryModerate,
         );
       } finally {
         setBacktestLoading(false);
