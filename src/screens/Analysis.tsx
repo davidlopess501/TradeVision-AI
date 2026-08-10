@@ -31,6 +31,10 @@ import type {
 } from '@/services/backtestEngine';
 
 import {
+  WIN_15M_REAL_CANDLES,
+} from '@/data/win15mReal';
+
+import {
   connectBroker,
   getBrokerAccount,
   getBrokerStatus,
@@ -482,6 +486,208 @@ export default function AnalysisScreen({
   }
 
   async function handleRunBacktest() {
+    const costScenarios = {
+      ZERO: {
+        slippageTicksPerSide: 0,
+        fixedCostPerContractRoundTrip: 0,
+      },
+      LEVE: {
+        slippageTicksPerSide: 1,
+        fixedCostPerContractRoundTrip: 0.5,
+      },
+      MODERADO: {
+        slippageTicksPerSide: 2,
+        fixedCostPerContractRoundTrip: 1,
+      },
+    } as const;
+
+    const isRealWin15m =
+      asset === 'WIN' &&
+      timeframe === '15m';
+
+    if (isRealWin15m) {
+      const realCandles =
+        WIN_15M_REAL_CANDLES;
+
+      if (realCandles.length < 360) {
+        console.warn(
+          `[TradeVision] WIN 15m REAL requer pelo menos 360 candles. Recebidos: ${realCandles.length}.`,
+        );
+        return;
+      }
+
+      setBacktestLoading(true);
+
+      try {
+        const baseBlockSize =
+          Math.floor(
+            realCandles.length / 3,
+          );
+
+        const blockA =
+          realCandles.slice(
+            0,
+            baseBlockSize,
+          );
+
+        const blockB =
+          realCandles.slice(
+            baseBlockSize,
+            baseBlockSize * 2,
+          );
+
+        const blockC =
+          realCandles.slice(
+            baseBlockSize * 2,
+          );
+
+        console.group(
+          '[TradeVision] WIN 15m REAL — VALIDAÇÃO A/B/C + STRESS TEST DE CUSTOS',
+        );
+
+        console.log(
+          '[TradeVision] Fonte',
+          {
+            asset: 'WIN',
+            timeframe: '15m',
+            source:
+              'Toro Trader — OHLC real',
+            totalCandles:
+              realCandles.length,
+            volume:
+              'INDISPONÍVEL — mantido neutro, sem dados inventados',
+          },
+        );
+
+        console.log(
+          '[TradeVision] Blocos reais',
+          {
+            A: {
+              candles:
+                blockA.length,
+              from:
+                blockA[0]?.time,
+              to:
+                blockA[
+                  blockA.length - 1
+                ]?.time,
+            },
+            B: {
+              candles:
+                blockB.length,
+              from:
+                blockB[0]?.time,
+              to:
+                blockB[
+                  blockB.length - 1
+                ]?.time,
+            },
+            C: {
+              candles:
+                blockC.length,
+              from:
+                blockC[0]?.time,
+              to:
+                blockC[
+                  blockC.length - 1
+                ]?.time,
+            },
+          },
+        );
+
+        console.log(
+          '[TradeVision] Cenários',
+          costScenarios,
+        );
+
+        async function runRealBlock(
+          blockCandles: Candle[],
+          executionCosts: (typeof costScenarios)[keyof typeof costScenarios],
+        ) {
+          return runBacktestV2({
+            asset: 'WIN',
+            timeframe: '15m',
+            initialCapital: 10000,
+            candles: blockCandles,
+            strategyMode: 'BUY_ONLY',
+            executionCosts,
+          });
+        }
+
+        const [
+          aZero,
+          aLight,
+          aModerate,
+          bZero,
+          bLight,
+          bModerate,
+          cZero,
+          cLight,
+          cModerate,
+        ] = await Promise.all([
+          runRealBlock(blockA, costScenarios.ZERO),
+          runRealBlock(blockA, costScenarios.LEVE),
+          runRealBlock(blockA, costScenarios.MODERADO),
+
+          runRealBlock(blockB, costScenarios.ZERO),
+          runRealBlock(blockB, costScenarios.LEVE),
+          runRealBlock(blockB, costScenarios.MODERADO),
+
+          runRealBlock(blockC, costScenarios.ZERO),
+          runRealBlock(blockC, costScenarios.LEVE),
+          runRealBlock(blockC, costScenarios.MODERADO),
+        ]);
+
+        const row = (
+          result: BacktestResult,
+        ) => ({
+          trades:
+            result.totalTrades,
+          winRate:
+            result.winRate,
+          netProfit:
+            result.netProfit,
+          profitFactor:
+            result.profitFactor,
+          maxDrawdown:
+            result.maxDrawdown,
+        });
+
+        console.table({
+          'A REAL — ZERO':
+            row(aZero),
+          'A REAL — LEVE':
+            row(aLight),
+          'A REAL — MODERADO':
+            row(aModerate),
+
+          'B REAL — ZERO':
+            row(bZero),
+          'B REAL — LEVE':
+            row(bLight),
+          'B REAL — MODERADO':
+            row(bModerate),
+
+          'C REAL — ZERO':
+            row(cZero),
+          'C REAL — LEVE':
+            row(cLight),
+          'C REAL — MODERADO':
+            row(cModerate),
+        });
+
+        console.groupEnd();
+
+        setBacktestResult(
+          cModerate,
+        );
+      } finally {
+        setBacktestLoading(false);
+      }
+
+      return;
+    }
+
     const blockSize = 5000;
     const requiredCandles =
       blockSize * 6;
@@ -498,21 +704,6 @@ export default function AnalysisScreen({
     setBacktestLoading(true);
 
     try {
-      const costScenarios = {
-        ZERO: {
-          slippageTicksPerSide: 0,
-          fixedCostPerContractRoundTrip: 0,
-        },
-        LEVE: {
-          slippageTicksPerSide: 1,
-          fixedCostPerContractRoundTrip: 0.5,
-        },
-        MODERADO: {
-          slippageTicksPerSide: 2,
-          fixedCostPerContractRoundTrip: 1,
-        },
-      } as const;
-
       const blockA =
         candles.slice(
           candles.length - blockSize * 6,
