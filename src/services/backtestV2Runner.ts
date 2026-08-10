@@ -515,6 +515,44 @@ export async function runBacktestV2(
       riskBlockReasons: {},
     };
 
+  const buyByScore: Record<string, SellBucketStats> = {
+    'score65-66': createSellBucketStats(),
+    'score67-68': createSellBucketStats(),
+    'score69-70': createSellBucketStats(),
+    'score71+': createSellBucketStats(),
+  };
+
+  const buyByConfidence: Record<string, SellBucketStats> = {
+    'conf65-69': createSellBucketStats(),
+    'conf70-74': createSellBucketStats(),
+    'conf75-79': createSellBucketStats(),
+    'conf80+': createSellBucketStats(),
+  };
+
+  const buyWinningIndicators =
+    createSellIndicatorDiagnostic();
+
+  const buyLosingIndicators =
+    createSellIndicatorDiagnostic();
+
+  const buyWinningMomentum =
+    createSellMomentumDiagnostic();
+
+  const buyLosingMomentum =
+    createSellMomentumDiagnostic();
+
+  const buyWinningScoreConfidence = {
+    trades: 0,
+    scoreTotal: 0,
+    confidenceTotal: 0,
+  };
+
+  const buyLosingScoreConfidence = {
+    trades: 0,
+    scoreTotal: 0,
+    confidenceTotal: 0,
+  };
+
   const sellByScore: Record<string, SellBucketStats> = {
     'score<=31': createSellBucketStats(),
     'score32': createSellBucketStats(),
@@ -903,13 +941,75 @@ export async function runBacktestV2(
     if (preparedOrder.side === 'BUY') {
       diagnostics.buyTrades += 1;
 
+      const buyScoreBucket =
+        analysis.score <= 66
+          ? 'score65-66'
+          : analysis.score <= 68
+            ? 'score67-68'
+            : analysis.score <= 70
+              ? 'score69-70'
+              : 'score71+';
+
+      registerSellBucketTrade(
+        buyByScore[buyScoreBucket],
+        pnl,
+      );
+
+      const buyConfidenceBucket =
+        decision.confidence < 70
+          ? 'conf65-69'
+          : decision.confidence < 75
+            ? 'conf70-74'
+            : decision.confidence < 80
+              ? 'conf75-79'
+              : 'conf80+';
+
+      registerSellBucketTrade(
+        buyByConfidence[
+          buyConfidenceBucket
+        ],
+        pnl,
+      );
+
       if (pnl > 0) {
         diagnostics.buyWins += 1;
         diagnostics.buyGrossProfit += pnl;
+
+        buyWinningScoreConfidence.trades += 1;
+        buyWinningScoreConfidence.scoreTotal +=
+          analysis.score;
+        buyWinningScoreConfidence.confidenceTotal +=
+          decision.confidence;
+
+        registerSellIndicators(
+          buyWinningIndicators,
+          analysis,
+        );
+
+        registerSellMomentum(
+          buyWinningMomentum,
+          historicalCandles,
+        );
       } else if (pnl < 0) {
         diagnostics.buyLosses += 1;
         diagnostics.buyGrossLoss +=
           Math.abs(pnl);
+
+        buyLosingScoreConfidence.trades += 1;
+        buyLosingScoreConfidence.scoreTotal +=
+          analysis.score;
+        buyLosingScoreConfidence.confidenceTotal +=
+          decision.confidence;
+
+        registerSellIndicators(
+          buyLosingIndicators,
+          analysis,
+        );
+
+        registerSellMomentum(
+          buyLosingMomentum,
+          historicalCandles,
+        );
       }
     } else {
       diagnostics.sellTrades += 1;
@@ -1205,6 +1305,118 @@ export async function runBacktestV2(
       )
         ? diagnostics.maxConfidence
         : 0,
+  });
+
+  console.log(
+    '[TradeVision] BUY por Score',
+  );
+
+  console.table({
+    'score65-66':
+      sellBucketSummary(
+        buyByScore['score65-66'],
+      ),
+    'score67-68':
+      sellBucketSummary(
+        buyByScore['score67-68'],
+      ),
+    'score69-70':
+      sellBucketSummary(
+        buyByScore['score69-70'],
+      ),
+    'score71+':
+      sellBucketSummary(
+        buyByScore['score71+'],
+      ),
+  });
+
+  console.log(
+    '[TradeVision] BUY por Confidence',
+  );
+
+  console.table({
+    'conf65-69':
+      sellBucketSummary(
+        buyByConfidence['conf65-69'],
+      ),
+    'conf70-74':
+      sellBucketSummary(
+        buyByConfidence['conf70-74'],
+      ),
+    'conf75-79':
+      sellBucketSummary(
+        buyByConfidence['conf75-79'],
+      ),
+    'conf80+':
+      sellBucketSummary(
+        buyByConfidence['conf80+'],
+      ),
+  });
+
+  const buyScoreConfidenceSummary = (
+    bucket: {
+      trades: number;
+      scoreTotal: number;
+      confidenceTotal: number;
+    },
+  ) => {
+    const divisor =
+      bucket.trades > 0
+        ? bucket.trades
+        : 1;
+
+    return {
+      trades: bucket.trades,
+      avgScore:
+        bucket.scoreTotal / divisor,
+      avgConfidence:
+        bucket.confidenceTotal / divisor,
+    };
+  };
+
+  console.log(
+    '[TradeVision] BUY Winners vs Losers - Score/Confidence',
+  );
+
+  console.table({
+    winners:
+      buyScoreConfidenceSummary(
+        buyWinningScoreConfidence,
+      ),
+    losers:
+      buyScoreConfidenceSummary(
+        buyLosingScoreConfidence,
+      ),
+  });
+
+  console.log(
+    '[TradeVision] BUY Winners vs Losers - Indicadores',
+  );
+
+  console.table({
+    winners:
+      sellIndicatorSummary(
+        buyWinningIndicators,
+      ),
+    losers:
+      sellIndicatorSummary(
+        buyLosingIndicators,
+      ),
+  });
+
+  console.log(
+    '[TradeVision] BUY Winners vs Losers - Momentum',
+  );
+
+  console.table({
+    winners:
+      sellMomentumSummary(
+        buyWinningMomentum,
+      ),
+    losers:
+      sellMomentumSummary(
+        buyLosingMomentum,
+      ),
   });
 
   console.log(
