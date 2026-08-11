@@ -1420,84 +1420,207 @@ export async function runBacktestV2(
   });
 
   console.log(
-    '[TradeVision] SELL por Score',
+    '[TradeVision] WIN15 BUY — VENCEDORES VS PERDEDORES',
   );
 
-  console.table({
-    'score<=31':
-      sellBucketSummary(
-        sellByScore['score<=31'],
-      ),
-    score32:
-      sellBucketSummary(
-        sellByScore.score32,
-      ),
-    score33:
-      sellBucketSummary(
-        sellByScore.score33,
-      ),
-    score34:
-      sellBucketSummary(
-        sellByScore.score34,
-      ),
-    score35:
-      sellBucketSummary(
-        sellByScore.score35,
-      ),
-  });
+  const buyWinnerScoreConfidence =
+    buyScoreConfidenceSummary(
+      buyWinningScoreConfidence,
+    );
 
-  console.log(
-    '[TradeVision] SELL por Confidence',
-  );
+  const buyLoserScoreConfidence =
+    buyScoreConfidenceSummary(
+      buyLosingScoreConfidence,
+    );
 
-  console.table({
-    'conf65-69':
-      sellBucketSummary(
-        sellByConfidence['conf65-69'],
-      ),
-    'conf70-74':
-      sellBucketSummary(
-        sellByConfidence['conf70-74'],
-      ),
-    'conf75-79':
-      sellBucketSummary(
-        sellByConfidence['conf75-79'],
-      ),
-    'conf80+':
-      sellBucketSummary(
-        sellByConfidence['conf80+'],
-      ),
-  });
+  const buyWinnerIndicators =
+    sellIndicatorSummary(
+      buyWinningIndicators,
+    );
 
-  console.log(
-    '[TradeVision] SELL Winners vs Losers - Indicadores',
-  );
+  const buyLoserIndicators =
+    sellIndicatorSummary(
+      buyLosingIndicators,
+    );
+
+  const buyWinnerMomentum =
+    sellMomentumSummary(
+      buyWinningMomentum,
+    );
+
+  const buyLoserMomentum =
+    sellMomentumSummary(
+      buyLosingMomentum,
+    );
 
   console.table({
-    winners:
-      sellIndicatorSummary(
-        sellWinningIndicators,
-      ),
-    losers:
-      sellIndicatorSummary(
-        sellLosingIndicators,
-      ),
+    Trades: {
+      WINNERS:
+        buyWinnerScoreConfidence.trades,
+      LOSERS:
+        buyLoserScoreConfidence.trades,
+    },
+
+    'Score médio': {
+      WINNERS:
+        buyWinnerScoreConfidence.avgScore,
+      LOSERS:
+        buyLoserScoreConfidence.avgScore,
+    },
+
+    'Confidence média': {
+      WINNERS:
+        buyWinnerScoreConfidence.avgConfidence,
+      LOSERS:
+        buyLoserScoreConfidence.avgConfidence,
+    },
+
+    'EMA9 média': {
+      WINNERS:
+        buyWinnerIndicators.avgEma9,
+      LOSERS:
+        buyLoserIndicators.avgEma9,
+    },
+
+    'EMA21 média': {
+      WINNERS:
+        buyWinnerIndicators.avgEma21,
+      LOSERS:
+        buyLoserIndicators.avgEma21,
+    },
+
+    'RSI médio': {
+      WINNERS:
+        buyWinnerIndicators.avgRsi,
+      LOSERS:
+        buyLoserIndicators.avgRsi,
+    },
+
+    'MACD médio': {
+      WINNERS:
+        buyWinnerIndicators.avgMacd,
+      LOSERS:
+        buyLoserIndicators.avgMacd,
+    },
+
+    'Volume médio': {
+      WINNERS:
+        buyWinnerIndicators.avgVolume,
+      LOSERS:
+        buyLoserIndicators.avgVolume,
+    },
+
+    'Momentum 3': {
+      WINNERS:
+        buyWinnerMomentum.avgReturn3,
+      LOSERS:
+        buyLoserMomentum.avgReturn3,
+    },
+
+    'Momentum 5': {
+      WINNERS:
+        buyWinnerMomentum.avgReturn5,
+      LOSERS:
+        buyLoserMomentum.avgReturn5,
+    },
+
+    'Momentum 10': {
+      WINNERS:
+        buyWinnerMomentum.avgReturn10,
+      LOSERS:
+        buyLoserMomentum.avgReturn10,
+    },
+
+    'Momentum 20': {
+      WINNERS:
+        buyWinnerMomentum.avgReturn20,
+      LOSERS:
+        buyLoserMomentum.avgReturn20,
+    },
   });
 
-  console.log(
-    '[TradeVision] SELL Winners vs Losers - Momentum',
-  );
+  if (strategyMode !== 'BUY_ONLY') {
+    console.log(
+      '[TradeVision] SELL por Score',
+    );
 
-  console.table({
-    winners:
-      sellMomentumSummary(
-        sellWinningMomentum,
-      ),
-    losers:
-      sellMomentumSummary(
-        sellLosingMomentum,
-      ),
-  });
+    console.table({
+      'score<=31':
+        sellBucketSummary(
+          sellByScore['score<=31'],
+        ),
+      score32:
+        sellBucketSummary(
+          sellByScore.score32,
+        ),
+      score33:
+        sellBucketSummary(
+          sellByScore.score33,
+        ),
+      score34:
+        sellBucketSummary(
+          sellByScore.score34,
+        ),
+      score35:
+        sellBucketSummary(
+          sellByScore.score35,
+        ),
+    });
+
+    console.log(
+      '[TradeVision] SELL por Confidence',
+    );
+
+    console.table({
+      'conf65-69':
+        sellBucketSummary(
+          sellByConfidence['conf65-69'],
+        ),
+      'conf70-74':
+        sellBucketSummary(
+          sellByConfidence['conf70-74'],
+        ),
+      'conf75-79':
+        sellBucketSummary(
+          sellByConfidence['conf75-79'],
+        ),
+      'conf80+':
+        sellBucketSummary(
+          sellByConfidence['conf80+'],
+        ),
+    });
+
+    console.log(
+      '[TradeVision] SELL Winners vs Losers - Indicadores',
+    );
+
+    console.table({
+      winners:
+        sellIndicatorSummary(
+          sellWinningIndicators,
+        ),
+      losers:
+        sellIndicatorSummary(
+          sellLosingIndicators,
+        ),
+    });
+
+    console.log(
+      '[TradeVision] SELL Winners vs Losers - Momentum',
+    );
+
+    console.table({
+      winners:
+        sellMomentumSummary(
+          sellWinningMomentum,
+        ),
+      losers:
+        sellMomentumSummary(
+          sellLosingMomentum,
+        ),
+    });
+
+  }
 
   if (
     Object.keys(
