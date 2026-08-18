@@ -23,6 +23,7 @@ import {
 
 import {
   DEFAULT_RISK_RULES,
+  getRiskRulesForAsset,
   evaluateOrderRisk,
 } from '@/services/riskManager';
 
@@ -1245,7 +1246,7 @@ export default function AnalysisScreen({
           const diagnosticRisk =
             evaluateOrderRisk(
               diagnosticOrder,
-              DEFAULT_RISK_RULES,
+              getRiskRulesForAsset('WDO'),
               {
                 dailyPnl: 0,
                 openPositions: 0,
