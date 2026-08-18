@@ -39,6 +39,11 @@ import {
 } from '@/data/win15mOutOfSample';
 
 import {
+  buildOosMonitorSnapshot,
+  printOosMonitor,
+} from '@/services/oosMonitor';
+
+import {
   connectBroker,
   getBrokerAccount,
   getBrokerStatus,
@@ -995,6 +1000,18 @@ export default function AnalysisScreen({
         );
 
         console.groupEnd();
+
+        const oosMonitorSnapshot =
+          buildOosMonitorSnapshot({
+            candles:
+              oosCandles.length,
+            result:
+              oosResult,
+          });
+
+        printOosMonitor(
+          oosMonitorSnapshot,
+        );
 
         /*
          * O painel mostra o resultado do teste cego OOS 01.
