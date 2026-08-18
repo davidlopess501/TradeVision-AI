@@ -342,6 +342,94 @@ function sellMomentumSummary(
   };
 }
 
+
+interface RobustnessTradeSample {
+  pnl: number;
+  rsi: number;
+  ema9: number;
+  ema21: number;
+  macd: number;
+  momentum3: number;
+  momentum5: number;
+  momentum10: number;
+  momentum20: number;
+}
+
+interface RobustnessFilter {
+  name: string;
+  test: (sample: RobustnessTradeSample) => boolean;
+}
+
+function diagnosticStrength(
+  analysis: ReturnType<typeof buildHistoricalAnalysis>,
+  key: string,
+): number {
+  return (
+    analysis.indicators.find(
+      (indicator) => indicator.key === key,
+    )?.strength ?? 50
+  );
+}
+
+function robustnessStats(
+  samples: RobustnessTradeSample[],
+) {
+  const trades = samples.length;
+  const wins = samples.filter(
+    (sample) => sample.pnl > 0,
+  ).length;
+  const losses = samples.filter(
+    (sample) => sample.pnl < 0,
+  ).length;
+
+  const grossProfit = samples.reduce(
+    (total, sample) =>
+      total + Math.max(0, sample.pnl),
+    0,
+  );
+
+  const grossLoss = samples.reduce(
+    (total, sample) =>
+      total + Math.max(0, -sample.pnl),
+    0,
+  );
+
+  const netProfit = grossProfit - grossLoss;
+
+  const profitFactor =
+    grossLoss > 0
+      ? grossProfit / grossLoss
+      : grossProfit > 0
+        ? Number.POSITIVE_INFINITY
+        : 0;
+
+  let equity = 0;
+  let peak = 0;
+  let maxDrawdownMoney = 0;
+
+  for (const sample of samples) {
+    equity += sample.pnl;
+    peak = Math.max(peak, equity);
+    maxDrawdownMoney = Math.max(
+      maxDrawdownMoney,
+      peak - equity,
+    );
+  }
+
+  return {
+    trades,
+    wins,
+    losses,
+    winRate:
+      trades > 0
+        ? (wins / trades) * 100
+        : 0,
+    netProfit,
+    profitFactor,
+    maxDrawdownMoney,
+  };
+}
+
 function uid(): string {
   return (
     crypto.randomUUID?.() ??
@@ -579,6 +667,14 @@ export async function runBacktestV2(
 
   const sellLosingMomentum =
     createSellMomentumDiagnostic();
+
+  /*
+   * LAB ROBUSTEZ V1:
+   * coleta somente os trades BUY que a estratégia original já executaria.
+   * Não altera entrada, stop, target, risco ou custos.
+   */
+  const robustnessBuySamples:
+    RobustnessTradeSample[] = [];
 
   const windowSize = 120;
 
@@ -940,6 +1036,50 @@ export async function runBacktestV2(
 
     if (preparedOrder.side === 'BUY') {
       diagnostics.buyTrades += 1;
+
+      robustnessBuySamples.push({
+        pnl,
+        rsi:
+          diagnosticStrength(
+            analysis,
+            'rsi',
+          ),
+        ema9:
+          diagnosticStrength(
+            analysis,
+            'ema9',
+          ),
+        ema21:
+          diagnosticStrength(
+            analysis,
+            'ema21',
+          ),
+        macd:
+          diagnosticStrength(
+            analysis,
+            'macd',
+          ),
+        momentum3:
+          percentReturn(
+            historicalCandles,
+            3,
+          ),
+        momentum5:
+          percentReturn(
+            historicalCandles,
+            5,
+          ),
+        momentum10:
+          percentReturn(
+            historicalCandles,
+            10,
+          ),
+        momentum20:
+          percentReturn(
+            historicalCandles,
+            20,
+          ),
+      });
 
       const buyScoreBucket =
         analysis.score <= 66
@@ -1538,6 +1678,223 @@ export async function runBacktestV2(
         buyLoserMomentum.avgReturn20,
     },
   });
+
+
+  if (
+    strategyMode === 'BUY_ONLY' &&
+    robustnessBuySamples.length > 0
+  ) {
+    const baseline =
+      robustnessStats(
+        robustnessBuySamples,
+      );
+
+    const filters: RobustnessFilter[] = [
+      {
+        name: 'BASELINE — TODOS',
+        test: () => true,
+      },
+      {
+        name: 'RSI < 50',
+        test: (s) => s.rsi < 50,
+      },
+      {
+        name: 'RSI 50-52',
+        test: (s) =>
+          s.rsi >= 50 && s.rsi < 52,
+      },
+      {
+        name: 'RSI 52-54',
+        test: (s) =>
+          s.rsi >= 52 && s.rsi < 54,
+      },
+      {
+        name: 'RSI 54-56',
+        test: (s) =>
+          s.rsi >= 54 && s.rsi < 56,
+      },
+      {
+        name: 'RSI 56-58',
+        test: (s) =>
+          s.rsi >= 56 && s.rsi < 58,
+      },
+      {
+        name: 'RSI 58-60',
+        test: (s) =>
+          s.rsi >= 58 && s.rsi < 60,
+      },
+      {
+        name: 'RSI >= 60',
+        test: (s) => s.rsi >= 60,
+      },
+      {
+        name: 'RSI >= 52',
+        test: (s) => s.rsi >= 52,
+      },
+      {
+        name: 'RSI >= 54',
+        test: (s) => s.rsi >= 54,
+      },
+      {
+        name: 'RSI >= 56',
+        test: (s) => s.rsi >= 56,
+      },
+      {
+        name: 'M10 > 0',
+        test: (s) =>
+          s.momentum10 > 0,
+      },
+      {
+        name: 'M10 >= 0.5%',
+        test: (s) =>
+          s.momentum10 >= 0.5,
+      },
+      {
+        name: 'M10 >= 0.8%',
+        test: (s) =>
+          s.momentum10 >= 0.8,
+      },
+      {
+        name: 'RSI>=54 + M10>0',
+        test: (s) =>
+          s.rsi >= 54 &&
+          s.momentum10 > 0,
+      },
+      {
+        name: 'RSI>=54 + M10>=0.5%',
+        test: (s) =>
+          s.rsi >= 54 &&
+          s.momentum10 >= 0.5,
+      },
+      {
+        name: 'RSI>=56 + M10>0',
+        test: (s) =>
+          s.rsi >= 56 &&
+          s.momentum10 > 0,
+      },
+      {
+        name: 'EMA9 >= EMA21',
+        test: (s) =>
+          s.ema9 >= s.ema21,
+      },
+      {
+        name: 'RSI>=54 + EMA9>=EMA21',
+        test: (s) =>
+          s.rsi >= 54 &&
+          s.ema9 >= s.ema21,
+      },
+    ];
+
+    const minimumTrades =
+      Math.max(
+        20,
+        Math.ceil(
+          baseline.trades * 0.25,
+        ),
+      );
+
+    const ranking = filters.map(
+      (filter) => {
+        const selected =
+          robustnessBuySamples.filter(
+            filter.test,
+          );
+
+        const stats =
+          robustnessStats(selected);
+
+        const retentionPct =
+          baseline.trades > 0
+            ? (stats.trades /
+                baseline.trades) *
+              100
+            : 0;
+
+        const pfVsBaseline =
+          Number.isFinite(
+            stats.profitFactor,
+          ) &&
+          Number.isFinite(
+            baseline.profitFactor,
+          )
+            ? stats.profitFactor -
+              baseline.profitFactor
+            : 0;
+
+        const netVsBaseline =
+          stats.netProfit -
+          baseline.netProfit;
+
+        const validSample =
+          stats.trades >= minimumTrades;
+
+        const robustnessScore =
+          validSample
+            ? (
+                stats.profitFactor * 40 +
+                stats.winRate * 0.4 +
+                retentionPct * 0.15 +
+                Math.max(
+                  -20,
+                  Math.min(
+                    20,
+                    netVsBaseline / 50,
+                  ),
+                )
+              )
+            : -999;
+
+        return {
+          filtro: filter.name,
+          trades: stats.trades,
+          retencaoPct: retentionPct,
+          winRate: stats.winRate,
+          netProfit: stats.netProfit,
+          profitFactor: stats.profitFactor,
+          maxDrawdownMoney:
+            stats.maxDrawdownMoney,
+          pfVsBaseline,
+          netVsBaseline,
+          amostraValida: validSample,
+          robustnessScore,
+        };
+      },
+    );
+
+    ranking.sort(
+      (a, b) =>
+        b.robustnessScore -
+        a.robustnessScore,
+    );
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V1 — BASELINE',
+      {
+        ...baseline,
+        minimumTrades,
+      },
+    );
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V1 — RANKING DE FILTROS',
+    );
+    console.table(ranking);
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V1 — TOP 5',
+    );
+    console.table(
+      ranking
+        .filter(
+          (row) => row.amostraValida,
+        )
+        .slice(0, 5),
+    );
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V1 — nenhum filtro foi aplicado à estratégia; resultado apenas exploratório.',
+    );
+  }
 
   if (strategyMode !== 'BUY_ONLY') {
     console.log(
