@@ -345,6 +345,7 @@ function sellMomentumSummary(
 
 interface RobustnessTradeSample {
   sequence: number;
+  candleIndex: number;
   pnl: number;
   rsi: number;
   ema9: number;
@@ -1041,6 +1042,7 @@ export async function runBacktestV2(
       robustnessBuySamples.push({
         sequence:
           robustnessBuySamples.length,
+        candleIndex: index,
         pnl,
         rsi:
           diagnosticStrength(
@@ -2063,6 +2065,173 @@ export async function runBacktestV2(
         passConsistency:
           positiveWindows >= 5 &&
           improvedPFWindows >= 4,
+      },
+    );
+
+    /*
+     * LAB ROBUSTEZ V3 — mesmas janelas cronológicas de 500 candles
+     * usadas no walk-forward do Analysis.tsx.
+     *
+     * O candidato permanece CONGELADO:
+     * RSI-strength >= 54 + Momentum10 >= 0.5%.
+     *
+     * Nenhum parâmetro é reotimizado por janela.
+     */
+    const realWindowSize = 500;
+    const realWindowCount =
+      Math.ceil(
+        config.candles.length /
+          realWindowSize,
+      );
+
+    const v3Rows: Array<{
+      janela: string;
+      candleStart: number;
+      candleEnd: number;
+      baseTrades: number;
+      filteredTrades: number;
+      retentionPct: number;
+      baseNet: number;
+      filteredNet: number;
+      basePF: number;
+      filteredPF: number;
+      baseWinRate: number;
+      filteredWinRate: number;
+      filteredMaxDD: number;
+      improvedNet: boolean;
+      improvedPF: boolean;
+      positive: boolean;
+    }> = [];
+
+    for (
+      let windowIndex = 0;
+      windowIndex < realWindowCount;
+      windowIndex += 1
+    ) {
+      const candleStart =
+        windowIndex * realWindowSize;
+
+      const candleEnd =
+        Math.min(
+          config.candles.length,
+          candleStart +
+            realWindowSize,
+        );
+
+      const baseWindow =
+        robustnessBuySamples.filter(
+          (sample) =>
+            sample.candleIndex >=
+              candleStart &&
+            sample.candleIndex <
+              candleEnd,
+        );
+
+      const filteredWindow =
+        baseWindow.filter(
+          frozenCandidate,
+        );
+
+      const baseStats =
+        robustnessStats(
+          baseWindow,
+        );
+
+      const filteredStats =
+        robustnessStats(
+          filteredWindow,
+        );
+
+      v3Rows.push({
+        janela:
+          `W${windowIndex + 1}`,
+        candleStart,
+        candleEnd:
+          candleEnd - 1,
+        baseTrades:
+          baseStats.trades,
+        filteredTrades:
+          filteredStats.trades,
+        retentionPct:
+          baseStats.trades > 0
+            ? (
+                filteredStats.trades /
+                baseStats.trades
+              ) * 100
+            : 0,
+        baseNet:
+          baseStats.netProfit,
+        filteredNet:
+          filteredStats.netProfit,
+        basePF:
+          baseStats.profitFactor,
+        filteredPF:
+          filteredStats.profitFactor,
+        baseWinRate:
+          baseStats.winRate,
+        filteredWinRate:
+          filteredStats.winRate,
+        filteredMaxDD:
+          filteredStats.maxDrawdownMoney,
+        improvedNet:
+          filteredStats.netProfit >
+          baseStats.netProfit,
+        improvedPF:
+          filteredStats.profitFactor >
+          baseStats.profitFactor,
+        positive:
+          filteredStats.netProfit > 0,
+      });
+    }
+
+    const v3PositiveWindows =
+      v3Rows.filter(
+        (row) => row.positive,
+      ).length;
+
+    const v3ImprovedNetWindows =
+      v3Rows.filter(
+        (row) => row.improvedNet,
+      ).length;
+
+    const v3ImprovedPFWindows =
+      v3Rows.filter(
+        (row) => row.improvedPF,
+      ).length;
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V3 — JANELAS REAIS 500 CANDLES',
+    );
+    console.table(v3Rows);
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V3 — VEREDITO',
+      {
+        candidate:
+          'RSI-strength >= 54 + Momentum10 >= 0.5%',
+        windowSizeCandles:
+          realWindowSize,
+        totalWindows:
+          realWindowCount,
+        positiveWindows:
+          v3PositiveWindows,
+        improvedNetWindows:
+          v3ImprovedNetWindows,
+        improvedPFWindows:
+          v3ImprovedPFWindows,
+        candidateTrades:
+          candidateAll.trades,
+        candidateWinRate:
+          candidateAll.winRate,
+        candidateNetProfit:
+          candidateAll.netProfit,
+        candidateProfitFactor:
+          candidateAll.profitFactor,
+        candidateMaxDrawdownMoney:
+          candidateAll.maxDrawdownMoney,
+        passConsistency:
+          v3PositiveWindows >= 5 &&
+          v3ImprovedPFWindows >= 4,
       },
     );
   }
