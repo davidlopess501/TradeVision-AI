@@ -60,6 +60,12 @@ export interface BacktestV2Config {
    * Sem configuração, o comportamento antigo é preservado (custo zero).
    */
   executionCosts?: Partial<BacktestExecutionCostConfig>;
+
+  /**
+   * Filtro congelado usado apenas em validação out-of-sample.
+   * Quando ausente, o comportamento original é preservado.
+   */
+  frozenBuyFilter?: 'RSI_STRENGTH_54_M10_05';
 }
 
 interface BacktestDiagnostics {
@@ -430,6 +436,43 @@ function robustnessStats(
     profitFactor,
     maxDrawdownMoney,
   };
+}
+
+
+function passesFrozenBuyFilter(
+  filter:
+    | BacktestV2Config['frozenBuyFilter']
+    | undefined,
+  analysis: ReturnType<typeof buildHistoricalAnalysis>,
+  historicalCandles: Candle[],
+): boolean {
+  if (!filter) {
+    return true;
+  }
+
+  if (
+    filter ===
+    'RSI_STRENGTH_54_M10_05'
+  ) {
+    const rsiStrength =
+      analysis.indicators.find(
+        (indicator) =>
+          indicator.key === 'rsi',
+      )?.strength ?? 50;
+
+    const momentum10 =
+      percentReturn(
+        historicalCandles,
+        10,
+      );
+
+    return (
+      rsiStrength >= 54 &&
+      momentum10 >= 0.5
+    );
+  }
+
+  return true;
 }
 
 function uid(): string {
@@ -846,6 +889,17 @@ export async function runBacktestV2(
     if (
       strategyMode === 'BUY_ONLY' &&
       preparedOrder.side === 'SELL'
+    ) {
+      continue;
+    }
+
+    if (
+      preparedOrder.side === 'BUY' &&
+      !passesFrozenBuyFilter(
+        config.frozenBuyFilter,
+        analysis,
+        historicalCandles,
+      )
     ) {
       continue;
     }

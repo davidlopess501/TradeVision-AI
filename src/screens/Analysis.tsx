@@ -35,6 +35,10 @@ import {
 } from '@/data/win15mReal';
 
 import {
+  WIN_15M_OUT_OF_SAMPLE_CANDLES,
+} from '@/data/win15mOutOfSample';
+
+import {
   connectBroker,
   getBrokerAccount,
   getBrokerStatus,
@@ -935,11 +939,68 @@ export default function AnalysisScreen({
         console.groupEnd();
 
         /*
-         * O painel agora mostra o resultado do histórico real completo
-         * no cenário MODERADO.
+         * OUT-OF-SAMPLE 01 — teste cego.
+         *
+         * Dataset: somente candles posteriores à base usada
+         * para descobrir o filtro.
+         *
+         * Regra congelada:
+         * RSI-strength >= 54 + Momentum10 >= 0.5%.
+         */
+        const oosCandles =
+          WIN_15M_OUT_OF_SAMPLE_CANDLES;
+
+        const oosResult =
+          await runBacktestV2({
+            asset: 'WIN',
+            timeframe: '15m',
+            initialCapital: 10000,
+            candles: oosCandles,
+            strategyMode: 'BUY_ONLY',
+            executionCosts:
+              costScenarios.MODERADO,
+            frozenBuyFilter:
+              'RSI_STRENGTH_54_M10_05',
+          });
+
+        console.group(
+          '[TradeVision] OUT-OF-SAMPLE 01 — RESULTADO CEGO',
+        );
+
+        console.table({
+          'WIN15 OOS 01 — FILTRO CONGELADO': {
+            candles:
+              oosCandles.length,
+            trades:
+              oosResult.totalTrades,
+            winRate:
+              oosResult.winRate,
+            netProfit:
+              oosResult.netProfit,
+            profitFactor:
+              oosResult.profitFactor,
+            maxDrawdown:
+              oosResult.maxDrawdown,
+          },
+        });
+
+        console.log(
+          '[TradeVision] OUT-OF-SAMPLE 01 — REGRA',
+          'RSI-strength >= 54 + Momentum10 >= 0.5%',
+        );
+
+        console.log(
+          '[TradeVision] OUT-OF-SAMPLE 01 — OBSERVAÇÃO',
+          'Amostra curta: 206 candles. Resultado não deve ser usado isoladamente para aprovar/reprovar a estratégia.',
+        );
+
+        console.groupEnd();
+
+        /*
+         * O painel mostra o resultado do teste cego OOS 01.
          */
         setBacktestResult(
-          fullHistoryModerate,
+          oosResult,
         );
       } finally {
         setBacktestLoading(false);
