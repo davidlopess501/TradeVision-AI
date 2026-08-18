@@ -17,7 +17,7 @@ import {
 } from './orderManager';
 
 import {
-  DEFAULT_RISK_RULES,
+  getRiskRulesForAsset,
   evaluateOrderRisk,
 } from './riskManager';
 
@@ -910,7 +910,7 @@ export async function runBacktestV2(
     const risk =
       evaluateOrderRisk(
         preparedOrder,
-        DEFAULT_RISK_RULES,
+        getRiskRulesForAsset(config.asset),
         {
           dailyPnl: 0,
           openPositions: 0,
