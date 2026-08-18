@@ -50,10 +50,11 @@ export interface BacktestV2Config {
   /**
    * BOTH = executa BUY e SELL normalmente.
    * BUY_ONLY = mantém toda a estratégia, mas ignora ordens SELL.
+     * SELL_ONLY = mantém toda a estratégia, mas ignora ordens BUY.
    *
    * Default: BOTH.
    */
-  strategyMode?: 'BOTH' | 'BUY_ONLY';
+  strategyMode?: 'BOTH' | 'BUY_ONLY' | 'SELL_ONLY';
 
   /**
    * Custos opcionais de execução.
@@ -887,8 +888,10 @@ export async function runBacktestV2(
      * normalmente, mas ordens SELL não entram na lista de trades.
      */
     if (
-      strategyMode === 'BUY_ONLY' &&
-      preparedOrder.side === 'SELL'
+      (strategyMode === 'BUY_ONLY' &&
+        preparedOrder.side === 'SELL') ||
+      (strategyMode === 'SELL_ONLY' &&
+        preparedOrder.side === 'BUY')
     ) {
       continue;
     }

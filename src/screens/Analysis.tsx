@@ -39,6 +39,10 @@ import {
 } from '@/data/win15mOutOfSample';
 
 import {
+  WDO_15M_REAL_CANDLES,
+} from '@/data/wdo15mReal';
+
+import {
   buildOosMonitorSnapshot,
   printOosMonitor,
 } from '@/services/oosMonitor';
@@ -1018,6 +1022,219 @@ export default function AnalysisScreen({
          */
         setBacktestResult(
           oosResult,
+        );
+      } finally {
+        setBacktestLoading(false);
+      }
+
+      return;
+    }
+
+    const isRealWdo15m =
+      asset === 'WDO' &&
+      timeframe === '15m';
+
+    if (isRealWdo15m) {
+      const realCandles =
+        WDO_15M_REAL_CANDLES;
+
+      const windowSize = 400;
+
+      if (realCandles.length < windowSize * 3) {
+        console.warn(
+          `[TradeVision] WDO 15m LAB requer pelo menos ${
+            windowSize * 3
+          } candles. Recebidos: ${realCandles.length}.`,
+        );
+        return;
+      }
+
+      setBacktestLoading(true);
+
+      try {
+        const windows: Candle[][] = [];
+
+        for (
+          let startIndex = 0;
+          startIndex < realCandles.length;
+          startIndex += windowSize
+        ) {
+          const windowCandles =
+            realCandles.slice(
+              startIndex,
+              Math.min(
+                startIndex + windowSize,
+                realCandles.length,
+              ),
+            );
+
+          if (windowCandles.length >= 300) {
+            windows.push(windowCandles);
+          }
+        }
+
+        const moderateCosts =
+          costScenarios.MODERADO;
+
+        const [buyFull, sellFull] =
+          await Promise.all([
+            runBacktestV2({
+              asset: 'WDO',
+              timeframe: '15m',
+              initialCapital: 10000,
+              candles: realCandles,
+              strategyMode: 'BUY_ONLY',
+              executionCosts: moderateCosts,
+            }),
+            runBacktestV2({
+              asset: 'WDO',
+              timeframe: '15m',
+              initialCapital: 10000,
+              candles: realCandles,
+              strategyMode: 'SELL_ONLY',
+              executionCosts: moderateCosts,
+            }),
+          ]);
+
+        const row = (
+          result: BacktestResult,
+        ) => ({
+          trades: result.totalTrades,
+          winRate: result.winRate,
+          netProfit: result.netProfit,
+          profitFactor: result.profitFactor,
+          maxDrawdown: result.maxDrawdown,
+        });
+
+        const buyWindows: BacktestResult[] = [];
+        const sellWindows: BacktestResult[] = [];
+
+        for (const windowCandles of windows) {
+          const [buy, sell] =
+            await Promise.all([
+              runBacktestV2({
+                asset: 'WDO',
+                timeframe: '15m',
+                initialCapital: 10000,
+                candles: windowCandles,
+                strategyMode: 'BUY_ONLY',
+                executionCosts: moderateCosts,
+              }),
+              runBacktestV2({
+                asset: 'WDO',
+                timeframe: '15m',
+                initialCapital: 10000,
+                candles: windowCandles,
+                strategyMode: 'SELL_ONLY',
+                executionCosts: moderateCosts,
+              }),
+            ]);
+
+          buyWindows.push(buy);
+          sellWindows.push(sell);
+        }
+
+        const summarize = (
+          results: BacktestResult[],
+        ) => {
+          const positiveWindows =
+            results.filter(
+              (result) => result.netProfit > 0,
+            ).length;
+
+          return {
+            windows: results.length,
+            positiveWindows,
+            negativeWindows:
+              results.filter(
+                (result) => result.netProfit < 0,
+              ).length,
+            positiveRate:
+              results.length > 0
+                ? (positiveWindows / results.length) * 100
+                : 0,
+            totalTrades:
+              results.reduce(
+                (total, result) =>
+                  total + result.totalTrades,
+                0,
+              ),
+            totalNetProfit:
+              results.reduce(
+                (total, result) =>
+                  total + result.netProfit,
+                0,
+              ),
+            worstDrawdown:
+              results.reduce(
+                (max, result) =>
+                  Math.max(max, result.maxDrawdown),
+                0,
+              ),
+          };
+        };
+
+        console.clear();
+        console.group(
+          '[TradeVision] WDO 15M REAL — LAB V1 BUY × SELL',
+        );
+
+        console.log(
+          '[TradeVision] Fonte',
+          {
+            asset: 'WDO',
+            timeframe: '15m',
+            source: 'Toro Trader — OHLC real',
+            totalCandles: realCandles.length,
+            executionCosts: 'MODERADO',
+            windowSize,
+            validWindows: windows.length,
+            volume:
+              'INDISPONÍVEL — mantido neutro, sem dados inventados',
+          },
+        );
+
+        console.table({
+          'WDO15 BUY_ONLY — MODERADO':
+            row(buyFull),
+          'WDO15 SELL_ONLY — MODERADO':
+            row(sellFull),
+        });
+
+        console.log(
+          '[TradeVision] WDO15 WALK-FORWARD BUY',
+          summarize(buyWindows),
+        );
+
+        console.log(
+          '[TradeVision] WDO15 WALK-FORWARD SELL',
+          summarize(sellWindows),
+        );
+
+        console.table(
+          Object.fromEntries(
+            windows.flatMap((_, index) => [
+              [
+                `W${index + 1} — BUY`,
+                row(buyWindows[index]),
+              ],
+              [
+                `W${index + 1} — SELL`,
+                row(sellWindows[index]),
+              ],
+            ]),
+          ),
+        );
+
+        console.log(
+          '[TradeVision] WDO 15M LAB V1 — FIM',
+        );
+        console.groupEnd();
+
+        setBacktestResult(
+          buyFull.netProfit >= sellFull.netProfit
+            ? buyFull
+            : sellFull,
         );
       } finally {
         setBacktestLoading(false);
