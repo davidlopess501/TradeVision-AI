@@ -344,6 +344,7 @@ function sellMomentumSummary(
 
 
 interface RobustnessTradeSample {
+  sequence: number;
   pnl: number;
   rsi: number;
   ema9: number;
@@ -1038,6 +1039,8 @@ export async function runBacktestV2(
       diagnostics.buyTrades += 1;
 
       robustnessBuySamples.push({
+        sequence:
+          robustnessBuySamples.length,
         pnl,
         rsi:
           diagnosticStrength(
@@ -1893,6 +1896,174 @@ export async function runBacktestV2(
 
     console.log(
       '[TradeVision] LAB ROBUSTEZ V1 — nenhum filtro foi aplicado à estratégia; resultado apenas exploratório.',
+    );
+
+    /*
+     * LAB ROBUSTEZ V2 — candidato congelado após a V1.
+     *
+     * IMPORTANTE:
+     * "RSI" aqui continua significando indicator.strength('rsi'),
+     * não o valor bruto clássico do RSI.
+     *
+     * A regra NÃO é reotimizada por janela:
+     * strength RSI >= 54 E retorno de 10 candles >= 0.5%.
+     */
+    const frozenCandidate = (
+      sample: RobustnessTradeSample,
+    ) =>
+      sample.rsi >= 54 &&
+      sample.momentum10 >= 0.5;
+
+    const totalSamples =
+      robustnessBuySamples.length;
+
+    const windowCount = 7;
+    const v2Rows: Array<{
+      janela: string;
+      baseTrades: number;
+      filteredTrades: number;
+      retentionPct: number;
+      baseNet: number;
+      filteredNet: number;
+      basePF: number;
+      filteredPF: number;
+      baseWinRate: number;
+      filteredWinRate: number;
+      filteredMaxDD: number;
+      improvedNet: boolean;
+      improvedPF: boolean;
+      positive: boolean;
+    }> = [];
+
+    for (
+      let windowIndex = 0;
+      windowIndex < windowCount;
+      windowIndex += 1
+    ) {
+      const start = Math.floor(
+        (windowIndex * totalSamples) /
+          windowCount,
+      );
+
+      const end = Math.floor(
+        ((windowIndex + 1) *
+          totalSamples) /
+          windowCount,
+      );
+
+      const baseWindow =
+        robustnessBuySamples.slice(
+          start,
+          end,
+        );
+
+      const filteredWindow =
+        baseWindow.filter(
+          frozenCandidate,
+        );
+
+      const baseStats =
+        robustnessStats(
+          baseWindow,
+        );
+
+      const filteredStats =
+        robustnessStats(
+          filteredWindow,
+        );
+
+      v2Rows.push({
+        janela: `W${windowIndex + 1}`,
+        baseTrades:
+          baseStats.trades,
+        filteredTrades:
+          filteredStats.trades,
+        retentionPct:
+          baseStats.trades > 0
+            ? (
+                filteredStats.trades /
+                baseStats.trades
+              ) * 100
+            : 0,
+        baseNet:
+          baseStats.netProfit,
+        filteredNet:
+          filteredStats.netProfit,
+        basePF:
+          baseStats.profitFactor,
+        filteredPF:
+          filteredStats.profitFactor,
+        baseWinRate:
+          baseStats.winRate,
+        filteredWinRate:
+          filteredStats.winRate,
+        filteredMaxDD:
+          filteredStats.maxDrawdownMoney,
+        improvedNet:
+          filteredStats.netProfit >
+          baseStats.netProfit,
+        improvedPF:
+          filteredStats.profitFactor >
+          baseStats.profitFactor,
+        positive:
+          filteredStats.netProfit > 0,
+      });
+    }
+
+    const candidateAll =
+      robustnessStats(
+        robustnessBuySamples.filter(
+          frozenCandidate,
+        ),
+      );
+
+    const positiveWindows =
+      v2Rows.filter(
+        (row) => row.positive,
+      ).length;
+
+    const improvedNetWindows =
+      v2Rows.filter(
+        (row) => row.improvedNet,
+      ).length;
+
+    const improvedPFWindows =
+      v2Rows.filter(
+        (row) => row.improvedPF,
+      ).length;
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V2 — CANDIDATO CONGELADO',
+      'RSI-strength >= 54 + Momentum10 >= 0.5%',
+    );
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V2 — W1-W7',
+    );
+    console.table(v2Rows);
+
+    console.log(
+      '[TradeVision] LAB ROBUSTEZ V2 — VEREDITO',
+      {
+        totalWindows:
+          windowCount,
+        positiveWindows,
+        improvedNetWindows,
+        improvedPFWindows,
+        candidateTrades:
+          candidateAll.trades,
+        candidateWinRate:
+          candidateAll.winRate,
+        candidateNetProfit:
+          candidateAll.netProfit,
+        candidateProfitFactor:
+          candidateAll.profitFactor,
+        candidateMaxDrawdownMoney:
+          candidateAll.maxDrawdownMoney,
+        passConsistency:
+          positiveWindows >= 5 &&
+          improvedPFWindows >= 4,
+      },
     );
   }
 
