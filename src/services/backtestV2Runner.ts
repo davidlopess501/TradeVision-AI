@@ -353,7 +353,10 @@ function sellMomentumSummary(
 interface RobustnessTradeSample {
   sequence: number;
   candleIndex: number;
+  side: 'BUY' | 'SELL';
   pnl: number;
+  score: number;
+  confidence: number;
   rsi: number;
   ema9: number;
   ema21: number;
@@ -720,6 +723,10 @@ export async function runBacktestV2(
    * Não altera entrada, stop, target, risco ou custos.
    */
   const robustnessBuySamples:
+    RobustnessTradeSample[] = [];
+
+  // WDO LAB V2 — coleta exploratória; não altera a estratégia.
+  const wdoLabSamples:
     RobustnessTradeSample[] = [];
 
   const windowSize = 120;
@@ -1093,6 +1100,25 @@ export async function runBacktestV2(
       diagnostics.currentLossStreak = 0;
     }
 
+    if (config.asset === 'WDO') {
+      wdoLabSamples.push({
+        sequence: wdoLabSamples.length,
+        candleIndex: index,
+        side: preparedOrder.side,
+        pnl,
+        score: analysis.score,
+        confidence: decision.confidence,
+        rsi: diagnosticStrength(analysis, 'rsi'),
+        ema9: diagnosticStrength(analysis, 'ema9'),
+        ema21: diagnosticStrength(analysis, 'ema21'),
+        macd: diagnosticStrength(analysis, 'macd'),
+        momentum3: percentReturn(historicalCandles, 3),
+        momentum5: percentReturn(historicalCandles, 5),
+        momentum10: percentReturn(historicalCandles, 10),
+        momentum20: percentReturn(historicalCandles, 20),
+      });
+    }
+
     if (preparedOrder.side === 'BUY') {
       diagnostics.buyTrades += 1;
 
@@ -1100,7 +1126,10 @@ export async function runBacktestV2(
         sequence:
           robustnessBuySamples.length,
         candleIndex: index,
+        side: 'BUY',
         pnl,
+        score: analysis.score,
+        confidence: decision.confidence,
         rsi:
           diagnosticStrength(
             analysis,
@@ -2374,6 +2403,127 @@ export async function runBacktestV2(
         ),
     });
 
+  }
+
+  // WDO LAB V2 — BUY/SELL separados, somente exploratório.
+  if (config.asset === 'WDO' && wdoLabSamples.length > 0) {
+    type LabSide = 'BUY' | 'SELL';
+    type LabFilter = {
+      name: string;
+      test: (s: RobustnessTradeSample) => boolean;
+    };
+
+    const avg = (
+      rows: RobustnessTradeSample[],
+      getter: (s: RobustnessTradeSample) => number,
+    ) =>
+      rows.length
+        ? rows.reduce((sum, s) => sum + getter(s), 0) / rows.length
+        : 0;
+
+    const filtersFor = (side: LabSide): LabFilter[] => {
+      const buy = side === 'BUY';
+      const filters: LabFilter[] = [
+        { name: 'BASELINE — TODOS', test: () => true },
+        ...[55, 60, 65, 70, 75].map((v) => ({
+          name: `Confidence >= ${v}`,
+          test: (s: RobustnessTradeSample) => s.confidence >= v,
+        })),
+        ...[50, 52, 54, 56, 58].map((v) => ({
+          name: buy ? `RSI-strength >= ${v}` : `RSI-strength <= ${100-v}`,
+          test: buy
+            ? (s: RobustnessTradeSample) => s.rsi >= v
+            : (s: RobustnessTradeSample) => s.rsi <= 100-v,
+        })),
+        ...[0, 0.1, 0.2, 0.3, 0.5].map((v) => ({
+          name: buy ? `M10 >= ${v}%` : `M10 <= -${v}%`,
+          test: buy
+            ? (s: RobustnessTradeSample) => s.momentum10 >= v
+            : (s: RobustnessTradeSample) => s.momentum10 <= -v,
+        })),
+        {
+          name: buy ? 'EMA9 >= EMA21' : 'EMA9 <= EMA21',
+          test: buy
+            ? (s) => s.ema9 >= s.ema21
+            : (s) => s.ema9 <= s.ema21,
+        },
+        {
+          name: buy ? 'RSI>=54 + M10>=0.2%' : 'RSI<=46 + M10<=-0.2%',
+          test: buy
+            ? (s) => s.rsi >= 54 && s.momentum10 >= 0.2
+            : (s) => s.rsi <= 46 && s.momentum10 <= -0.2,
+        },
+      ];
+      return filters;
+    };
+
+    const runLab = (side: LabSide) => {
+      const samples = wdoLabSamples.filter((s) => s.side === side);
+      const winners = samples.filter((s) => s.pnl > 0);
+      const losers = samples.filter((s) => s.pnl < 0);
+      const baseline = robustnessStats(samples);
+      const minimumTrades = Math.max(8, Math.ceil(baseline.trades * 0.25));
+
+      const summary = (rows: RobustnessTradeSample[]) => ({
+        trades: rows.length,
+        avgScore: avg(rows, (s) => s.score),
+        avgConfidence: avg(rows, (s) => s.confidence),
+        avgRsi: avg(rows, (s) => s.rsi),
+        avgEma9: avg(rows, (s) => s.ema9),
+        avgEma21: avg(rows, (s) => s.ema21),
+        avgMacd: avg(rows, (s) => s.macd),
+        avgM3: avg(rows, (s) => s.momentum3),
+        avgM5: avg(rows, (s) => s.momentum5),
+        avgM10: avg(rows, (s) => s.momentum10),
+        avgM20: avg(rows, (s) => s.momentum20),
+      });
+
+      const ranking = filtersFor(side).map((filter) => {
+        const stats = robustnessStats(samples.filter(filter.test));
+        const retentionPct = baseline.trades
+          ? (stats.trades / baseline.trades) * 100
+          : 0;
+        const valid = stats.trades >= minimumTrades;
+        const pf = Number.isFinite(stats.profitFactor)
+          ? stats.profitFactor
+          : 4;
+        return {
+          filtro: filter.name,
+          trades: stats.trades,
+          retencaoPct: retentionPct,
+          winRate: stats.winRate,
+          netProfit: stats.netProfit,
+          profitFactor: stats.profitFactor,
+          maxDrawdownMoney: stats.maxDrawdownMoney,
+          amostraExploratoriaValida: valid,
+          rankingScore: valid
+            ? Math.min(4, pf) * 35 +
+              stats.winRate * 0.45 +
+              retentionPct * 0.12
+            : -999,
+        };
+      }).sort((a, b) => b.rankingScore - a.rankingScore);
+
+      console.group(`[TradeVision] WDO LAB V2 — ${side}`);
+      console.log(`[TradeVision] WDO LAB V2 — ${side} — BASELINE`, {
+        ...baseline,
+        minimumTrades,
+      });
+      console.log(`[TradeVision] WDO LAB V2 — ${side} — WINNERS VS LOSERS`);
+      console.table({ WINNERS: summary(winners), LOSERS: summary(losers) });
+      console.log(`[TradeVision] WDO LAB V2 — ${side} — TOP 10`);
+      console.table(
+        ranking.filter((r) => r.amostraExploratoriaValida).slice(0, 10),
+      );
+      console.log(
+        `[TradeVision] WDO LAB V2 — ${side} — AVISO`,
+        'Exploratório: nenhum filtro foi aplicado à estratégia.',
+      );
+      console.groupEnd();
+    };
+
+    runLab('BUY');
+    runLab('SELL');
   }
 
   if (
