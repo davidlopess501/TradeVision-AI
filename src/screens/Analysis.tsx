@@ -1609,7 +1609,13 @@ export default function AnalysisScreen({
           };
         };
 
-        console.clear();
+        /*
+         * Não limpar o console aqui.
+         *
+         * O backtestV2Runner imprime o WDO LAB V2 durante as execuções.
+         * Se console.clear() for chamado neste ponto, os rankings
+         * BUY/SELL desaparecem antes de podermos analisá-los.
+         */
         console.group(
           '[TradeVision] WDO 15M REAL — LAB V1 BUY × SELL',
         );
