@@ -2532,6 +2532,397 @@ export async function runBacktestV2(
     runLab('SELL');
   }
 
+
+  /*
+   * WDO ROBUSTEZ V3 — candidatos congelados vindos do LAB V2.
+   *
+   * BUY  => Momentum10 >= +0.5%
+   * SELL => Momentum10 <= -0.5%
+   *
+   * Regras:
+   * - somente WDO;
+   * - histórico completo;
+   * - BUY e SELL avaliados separadamente;
+   * - divisão cronológica em janelas de 500 candles;
+   * - nenhum parâmetro é reotimizado por janela;
+   * - não altera entrada, stop, target, risco ou custos;
+   * - laboratório/validação: NÃO aplica os filtros à estratégia.
+   */
+  if (
+    config.asset === 'WDO' &&
+    config.candles.length >= 1000 &&
+    wdoLabSamples.length > 0
+  ) {
+    type WdoV3Side = 'BUY' | 'SELL';
+
+    const WDO_V3_WINDOW_SIZE = 500;
+
+    const candidateFor = (
+      side: WdoV3Side,
+      sample: RobustnessTradeSample,
+    ): boolean =>
+      side === 'BUY'
+        ? sample.momentum10 >= 0.5
+        : sample.momentum10 <= -0.5;
+
+    const evaluateSide = (
+      side: WdoV3Side,
+    ) => {
+      const sideSamples =
+        wdoLabSamples.filter(
+          (sample) => sample.side === side,
+        );
+
+      const candidateSamples =
+        sideSamples.filter(
+          (sample) =>
+            candidateFor(side, sample),
+        );
+
+      const baselineAll =
+        robustnessStats(sideSamples);
+
+      const candidateAll =
+        robustnessStats(
+          candidateSamples,
+        );
+
+      const realWindowCount =
+        Math.ceil(
+          config.candles.length /
+            WDO_V3_WINDOW_SIZE,
+        );
+
+      const rows: Array<{
+        janela: string;
+        candleStart: number;
+        candleEnd: number;
+        baseTrades: number;
+        filteredTrades: number;
+        retentionPct: number;
+        baseWinRate: number;
+        filteredWinRate: number;
+        baseNet: number;
+        filteredNet: number;
+        basePF: number;
+        filteredPF: number;
+        baseMaxDD: number;
+        filteredMaxDD: number;
+        improvedNet: boolean;
+        improvedPF: boolean;
+        reducedDD: boolean;
+        positive: boolean;
+      }> = [];
+
+      for (
+        let windowIndex = 0;
+        windowIndex < realWindowCount;
+        windowIndex += 1
+      ) {
+        const candleStart =
+          windowIndex *
+          WDO_V3_WINDOW_SIZE;
+
+        const candleEnd =
+          Math.min(
+            config.candles.length,
+            candleStart +
+              WDO_V3_WINDOW_SIZE,
+          );
+
+        const baseWindow =
+          sideSamples.filter(
+            (sample) =>
+              sample.candleIndex >=
+                candleStart &&
+              sample.candleIndex <
+                candleEnd,
+          );
+
+        const filteredWindow =
+          baseWindow.filter(
+            (sample) =>
+              candidateFor(
+                side,
+                sample,
+              ),
+          );
+
+        const baseStats =
+          robustnessStats(
+            baseWindow,
+          );
+
+        const filteredStats =
+          robustnessStats(
+            filteredWindow,
+          );
+
+        rows.push({
+          janela:
+            `W${windowIndex + 1}`,
+          candleStart,
+          candleEnd:
+            Math.max(
+              candleStart,
+              candleEnd - 1,
+            ),
+          baseTrades:
+            baseStats.trades,
+          filteredTrades:
+            filteredStats.trades,
+          retentionPct:
+            baseStats.trades > 0
+              ? (
+                  filteredStats.trades /
+                  baseStats.trades
+                ) * 100
+              : 0,
+          baseWinRate:
+            baseStats.winRate,
+          filteredWinRate:
+            filteredStats.winRate,
+          baseNet:
+            baseStats.netProfit,
+          filteredNet:
+            filteredStats.netProfit,
+          basePF:
+            baseStats.profitFactor,
+          filteredPF:
+            filteredStats.profitFactor,
+          baseMaxDD:
+            baseStats.maxDrawdownMoney,
+          filteredMaxDD:
+            filteredStats.maxDrawdownMoney,
+          improvedNet:
+            filteredStats.netProfit >
+            baseStats.netProfit,
+          improvedPF:
+            filteredStats.profitFactor >
+            baseStats.profitFactor,
+          reducedDD:
+            filteredStats.maxDrawdownMoney <
+            baseStats.maxDrawdownMoney,
+          positive:
+            filteredStats.trades > 0 &&
+            filteredStats.netProfit > 0,
+        });
+      }
+
+      /*
+       * Janelas sem nenhum trade filtrado não contam como
+       * "positivas" nem como evidência de consistência.
+       */
+      const windowsWithFilteredTrades =
+        rows.filter(
+          (row) =>
+            row.filteredTrades > 0,
+        ).length;
+
+      const positiveWindows =
+        rows.filter(
+          (row) => row.positive,
+        ).length;
+
+      const improvedNetWindows =
+        rows.filter(
+          (row) =>
+            row.filteredTrades > 0 &&
+            row.improvedNet,
+        ).length;
+
+      const improvedPFWindows =
+        rows.filter(
+          (row) =>
+            row.filteredTrades > 0 &&
+            row.improvedPF,
+        ).length;
+
+      const reducedDDWindows =
+        rows.filter(
+          (row) =>
+            row.filteredTrades > 0 &&
+            row.reducedDD,
+        ).length;
+
+      const retentionPct =
+        baselineAll.trades > 0
+          ? (
+              candidateAll.trades /
+              baselineAll.trades
+            ) * 100
+          : 0;
+
+      /*
+       * Critério deliberadamente conservador.
+       * Não "aprova" candidato com amostra minúscula.
+       */
+      const minimumCandidateTrades =
+        Math.max(
+          8,
+          Math.ceil(
+            baselineAll.trades *
+              0.25,
+          ),
+        );
+
+      const enoughTrades =
+        candidateAll.trades >=
+        minimumCandidateTrades;
+
+      const profitable =
+        candidateAll.netProfit > 0;
+
+      const pfAboveOne =
+        candidateAll.profitFactor > 1;
+
+      const enoughWindowCoverage =
+        windowsWithFilteredTrades >=
+        Math.min(
+          3,
+          realWindowCount,
+        );
+
+      const majorityPositive =
+        windowsWithFilteredTrades > 0 &&
+        positiveWindows >=
+          Math.ceil(
+            windowsWithFilteredTrades /
+              2,
+          );
+
+      const passConsistency =
+        enoughTrades &&
+        profitable &&
+        pfAboveOne &&
+        enoughWindowCoverage &&
+        majorityPositive;
+
+      const candidateName =
+        side === 'BUY'
+          ? 'Momentum10 >= +0.5%'
+          : 'Momentum10 <= -0.5%';
+
+      console.group(
+        `[TradeVision] WDO ROBUSTEZ V3 — ${side}`,
+      );
+
+      console.log(
+        `[TradeVision] WDO ROBUSTEZ V3 — ${side} — CANDIDATO`,
+        candidateName,
+      );
+
+      console.log(
+        `[TradeVision] WDO ROBUSTEZ V3 — ${side} — GERAL`,
+        {
+          candidate:
+            candidateName,
+          baselineTrades:
+            baselineAll.trades,
+          candidateTrades:
+            candidateAll.trades,
+          retentionPct,
+          baselineWinRate:
+            baselineAll.winRate,
+          candidateWinRate:
+            candidateAll.winRate,
+          baselineNetProfit:
+            baselineAll.netProfit,
+          candidateNetProfit:
+            candidateAll.netProfit,
+          baselineProfitFactor:
+            baselineAll.profitFactor,
+          candidateProfitFactor:
+            candidateAll.profitFactor,
+          baselineMaxDrawdownMoney:
+            baselineAll.maxDrawdownMoney,
+          candidateMaxDrawdownMoney:
+            candidateAll.maxDrawdownMoney,
+          minimumCandidateTrades,
+        },
+      );
+
+      console.log(
+        `[TradeVision] WDO ROBUSTEZ V3 — ${side} — JANELAS CRONOLÓGICAS`,
+      );
+      console.table(rows);
+
+      console.log(
+        `[TradeVision] WDO ROBUSTEZ V3 — ${side} — VEREDITO`,
+        {
+          candidate:
+            candidateName,
+          windowSizeCandles:
+            WDO_V3_WINDOW_SIZE,
+          totalWindows:
+            realWindowCount,
+          windowsWithFilteredTrades,
+          positiveWindows,
+          improvedNetWindows,
+          improvedPFWindows,
+          reducedDDWindows,
+          enoughTrades,
+          profitable,
+          pfAboveOne,
+          enoughWindowCoverage,
+          majorityPositive,
+          passConsistency,
+          verdict:
+            passConsistency
+              ? 'APROVADO PARA PRÓXIMA ETAPA DE VALIDAÇÃO'
+              : 'NÃO APROVADO — MANTER APENAS COMO HIPÓTESE',
+        },
+      );
+
+      console.groupEnd();
+
+      return {
+        side,
+        candidate:
+          candidateName,
+        baselineTrades:
+          baselineAll.trades,
+        candidateTrades:
+          candidateAll.trades,
+        retentionPct,
+        candidateWinRate:
+          candidateAll.winRate,
+        candidateNetProfit:
+          candidateAll.netProfit,
+        candidateProfitFactor:
+          candidateAll.profitFactor,
+        candidateMaxDrawdownMoney:
+          candidateAll.maxDrawdownMoney,
+        windowsWithFilteredTrades,
+        positiveWindows,
+        improvedNetWindows,
+        improvedPFWindows,
+        reducedDDWindows,
+        passConsistency,
+      };
+    };
+
+    const buyV3 =
+      evaluateSide('BUY');
+
+    const sellV3 =
+      evaluateSide('SELL');
+
+    console.log(
+      '[TradeVision] WDO ROBUSTEZ V3 — RESUMO FINAL BUY VS SELL',
+    );
+
+    console.table({
+      BUY: buyV3,
+      SELL: sellV3,
+    });
+
+    console.log(
+      '[TradeVision] WDO ROBUSTEZ V3 — FIM',
+      'Validação somente. Nenhum candidato foi aplicado à estratégia.',
+    );
+  }
+
   if (
     Object.keys(
       diagnostics.riskBlockReasons,
