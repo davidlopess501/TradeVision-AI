@@ -2406,7 +2406,13 @@ export async function runBacktestV2(
   }
 
   // WDO LAB V2 — BUY/SELL separados, somente exploratório.
-  if (config.asset === 'WDO' && wdoLabSamples.length > 0) {
+  // Executa apenas no histórico completo (>= 1000 candles), evitando
+  // repetir o laboratório nas janelas menores do walk-forward.
+  if (
+    config.asset === 'WDO' &&
+    config.candles.length >= 1000 &&
+    wdoLabSamples.length > 0
+  ) {
     type LabSide = 'BUY' | 'SELL';
     type LabFilter = {
       name: string;
