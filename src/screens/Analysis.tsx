@@ -14,6 +14,10 @@ import {
 } from '@/services/decisionEngine';
 
 import {
+  buildHistoricalAnalysis,
+} from '@/services/historicalAnalysisBuilder';
+
+import {
   prepareOrder,
 } from '@/services/orderManager';
 
@@ -1076,6 +1080,249 @@ export default function AnalysisScreen({
         const moderateCosts =
           costScenarios.MODERADO;
 
+        /*
+         * WDO FUNNEL DIAGNOSTIC
+         *
+         * Diagnóstico explícito e independente do resultado final do backtest.
+         * Replica o funil principal para descobrir exatamente onde o WDO
+         * deixa de produzir operações: sinal -> decisão -> ordem -> risco.
+         *
+         * Não altera estratégia, thresholds, stop, target ou custos.
+         */
+        const diagnosticWindowSize = 120;
+
+        const wdoDiagnostic = {
+          windowsEvaluated: 0,
+
+          finalSignalBuy: 0,
+          finalSignalSell: 0,
+          finalSignalWait: 0,
+
+          decisionBuy: 0,
+          decisionSell: 0,
+          decisionWait: 0,
+
+          ordersReady: 0,
+          ordersBlocked: 0,
+
+          buyOrdersReady: 0,
+          sellOrdersReady: 0,
+
+          riskApproved: 0,
+          riskBlocked: 0,
+
+          buyRiskApproved: 0,
+          sellRiskApproved: 0,
+
+          scoreMin: Number.POSITIVE_INFINITY,
+          scoreMax: Number.NEGATIVE_INFINITY,
+          scoreTotal: 0,
+
+          confidenceMin: Number.POSITIVE_INFINITY,
+          confidenceMax: Number.NEGATIVE_INFINITY,
+          confidenceTotal: 0,
+        };
+
+        for (
+          let diagnosticIndex = diagnosticWindowSize;
+          diagnosticIndex < realCandles.length - 1;
+          diagnosticIndex += 1
+        ) {
+          const historicalCandles =
+            realCandles.slice(
+              diagnosticIndex - diagnosticWindowSize,
+              diagnosticIndex + 1,
+            );
+
+          const historicalAnalysis =
+            buildHistoricalAnalysis(
+              'WDO',
+              '15m',
+              historicalCandles,
+            );
+
+          const historicalDecision =
+            evaluateAnalysis(
+              historicalAnalysis,
+            );
+
+          wdoDiagnostic.windowsEvaluated += 1;
+
+          wdoDiagnostic.scoreMin =
+            Math.min(
+              wdoDiagnostic.scoreMin,
+              historicalAnalysis.score,
+            );
+
+          wdoDiagnostic.scoreMax =
+            Math.max(
+              wdoDiagnostic.scoreMax,
+              historicalAnalysis.score,
+            );
+
+          wdoDiagnostic.scoreTotal +=
+            historicalAnalysis.score;
+
+          wdoDiagnostic.confidenceMin =
+            Math.min(
+              wdoDiagnostic.confidenceMin,
+              historicalDecision.confidence,
+            );
+
+          wdoDiagnostic.confidenceMax =
+            Math.max(
+              wdoDiagnostic.confidenceMax,
+              historicalDecision.confidence,
+            );
+
+          wdoDiagnostic.confidenceTotal +=
+            historicalDecision.confidence;
+
+          if (
+            historicalAnalysis.finalSignal === 'BUY'
+          ) {
+            wdoDiagnostic.finalSignalBuy += 1;
+          } else if (
+            historicalAnalysis.finalSignal === 'SELL'
+          ) {
+            wdoDiagnostic.finalSignalSell += 1;
+          } else {
+            wdoDiagnostic.finalSignalWait += 1;
+          }
+
+          if (
+            historicalDecision.action === 'BUY'
+          ) {
+            wdoDiagnostic.decisionBuy += 1;
+          } else if (
+            historicalDecision.action === 'SELL'
+          ) {
+            wdoDiagnostic.decisionSell += 1;
+          } else {
+            wdoDiagnostic.decisionWait += 1;
+          }
+
+          const diagnosticOrder =
+            prepareOrder(
+              historicalAnalysis,
+              historicalDecision,
+            );
+
+          if (
+            diagnosticOrder.status !== 'READY' ||
+            !diagnosticOrder.side
+          ) {
+            wdoDiagnostic.ordersBlocked += 1;
+            continue;
+          }
+
+          wdoDiagnostic.ordersReady += 1;
+
+          if (diagnosticOrder.side === 'BUY') {
+            wdoDiagnostic.buyOrdersReady += 1;
+          } else {
+            wdoDiagnostic.sellOrdersReady += 1;
+          }
+
+          const diagnosticRisk =
+            evaluateOrderRisk(
+              diagnosticOrder,
+              DEFAULT_RISK_RULES,
+              {
+                dailyPnl: 0,
+                openPositions: 0,
+              },
+            );
+
+          if (
+            diagnosticRisk.decision !== 'APPROVED' ||
+            diagnosticRisk.quantity < 1
+          ) {
+            wdoDiagnostic.riskBlocked += 1;
+            continue;
+          }
+
+          wdoDiagnostic.riskApproved += 1;
+
+          if (diagnosticOrder.side === 'BUY') {
+            wdoDiagnostic.buyRiskApproved += 1;
+          } else {
+            wdoDiagnostic.sellRiskApproved += 1;
+          }
+        }
+
+        const diagnosticDivisor =
+          wdoDiagnostic.windowsEvaluated > 0
+            ? wdoDiagnostic.windowsEvaluated
+            : 1;
+
+        const wdoDiagnosticSummary = {
+          windowsEvaluated:
+            wdoDiagnostic.windowsEvaluated,
+
+          finalSignalBuy:
+            wdoDiagnostic.finalSignalBuy,
+          finalSignalSell:
+            wdoDiagnostic.finalSignalSell,
+          finalSignalWait:
+            wdoDiagnostic.finalSignalWait,
+
+          decisionBuy:
+            wdoDiagnostic.decisionBuy,
+          decisionSell:
+            wdoDiagnostic.decisionSell,
+          decisionWait:
+            wdoDiagnostic.decisionWait,
+
+          ordersReady:
+            wdoDiagnostic.ordersReady,
+          ordersBlocked:
+            wdoDiagnostic.ordersBlocked,
+
+          buyOrdersReady:
+            wdoDiagnostic.buyOrdersReady,
+          sellOrdersReady:
+            wdoDiagnostic.sellOrdersReady,
+
+          riskApproved:
+            wdoDiagnostic.riskApproved,
+          riskBlocked:
+            wdoDiagnostic.riskBlocked,
+
+          buyRiskApproved:
+            wdoDiagnostic.buyRiskApproved,
+          sellRiskApproved:
+            wdoDiagnostic.sellRiskApproved,
+
+          minScore:
+            Number.isFinite(wdoDiagnostic.scoreMin)
+              ? wdoDiagnostic.scoreMin
+              : 0,
+          avgScore:
+            wdoDiagnostic.scoreTotal /
+            diagnosticDivisor,
+          maxScore:
+            Number.isFinite(wdoDiagnostic.scoreMax)
+              ? wdoDiagnostic.scoreMax
+              : 0,
+
+          minConfidence:
+            Number.isFinite(
+              wdoDiagnostic.confidenceMin,
+            )
+              ? wdoDiagnostic.confidenceMin
+              : 0,
+          avgConfidence:
+            wdoDiagnostic.confidenceTotal /
+            diagnosticDivisor,
+          maxConfidence:
+            Number.isFinite(
+              wdoDiagnostic.confidenceMax,
+            )
+              ? wdoDiagnostic.confidenceMax
+              : 0,
+        };
+
         const [buyFull, sellFull] =
           await Promise.all([
             runBacktestV2({
@@ -1193,6 +1440,79 @@ export default function AnalysisScreen({
               'INDISPONÍVEL — mantido neutro, sem dados inventados',
           },
         );
+
+        console.log(
+          '[TradeVision] WDO15 FUNIL — DIAGNÓSTICO EXPLÍCITO',
+        );
+
+        console.table({
+          'WDO15 FUNIL — TOTAL': {
+            windowsEvaluated:
+              wdoDiagnosticSummary.windowsEvaluated,
+
+            finalSignalBuy:
+              wdoDiagnosticSummary.finalSignalBuy,
+            finalSignalSell:
+              wdoDiagnosticSummary.finalSignalSell,
+            finalSignalWait:
+              wdoDiagnosticSummary.finalSignalWait,
+
+            decisionBuy:
+              wdoDiagnosticSummary.decisionBuy,
+            decisionSell:
+              wdoDiagnosticSummary.decisionSell,
+            decisionWait:
+              wdoDiagnosticSummary.decisionWait,
+
+            ordersReady:
+              wdoDiagnosticSummary.ordersReady,
+            ordersBlocked:
+              wdoDiagnosticSummary.ordersBlocked,
+
+            riskApproved:
+              wdoDiagnosticSummary.riskApproved,
+            riskBlocked:
+              wdoDiagnosticSummary.riskBlocked,
+
+            minScore:
+              wdoDiagnosticSummary.minScore,
+            avgScore:
+              wdoDiagnosticSummary.avgScore,
+            maxScore:
+              wdoDiagnosticSummary.maxScore,
+
+            minConfidence:
+              wdoDiagnosticSummary.minConfidence,
+            avgConfidence:
+              wdoDiagnosticSummary.avgConfidence,
+            maxConfidence:
+              wdoDiagnosticSummary.maxConfidence,
+          },
+        });
+
+        console.table({
+          'WDO15 BUY — FUNIL': {
+            finalSignals:
+              wdoDiagnosticSummary.finalSignalBuy,
+            decisions:
+              wdoDiagnosticSummary.decisionBuy,
+            ordersReady:
+              wdoDiagnosticSummary.buyOrdersReady,
+            riskApproved:
+              wdoDiagnosticSummary.buyRiskApproved,
+          },
+
+          'WDO15 SELL — FUNIL': {
+            finalSignals:
+              wdoDiagnosticSummary.finalSignalSell,
+            decisions:
+              wdoDiagnosticSummary.decisionSell,
+            ordersReady:
+              wdoDiagnosticSummary.sellOrdersReady,
+            riskApproved:
+              wdoDiagnosticSummary.sellRiskApproved,
+          },
+        });
 
         console.table({
           'WDO15 BUY_ONLY — MODERADO':
