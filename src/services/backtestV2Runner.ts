@@ -2908,18 +2908,65 @@ export async function runBacktestV2(
     const sellV3 =
       evaluateSide('SELL');
 
+    const finalDecision =
+      buyV3.passConsistency && sellV3.passConsistency
+        ? 'BUY E SELL APROVADOS PARA A PRÓXIMA ETAPA'
+        : buyV3.passConsistency
+          ? 'APENAS BUY APROVADO PARA A PRÓXIMA ETAPA'
+          : sellV3.passConsistency
+            ? 'APENAS SELL APROVADO PARA A PRÓXIMA ETAPA'
+            : 'NENHUM CANDIDATO APROVADO — MANTER COMO HIPÓTESE';
+
     console.log(
-      '[TradeVision] WDO ROBUSTEZ V3 — RESUMO FINAL BUY VS SELL',
+      '[TradeVision] ========================================',
     );
 
-    console.table({
-      BUY: buyV3,
-      SELL: sellV3,
+    console.log(
+      '[TradeVision] WDO ROBUSTEZ V3 — RESUMO FINAL',
+    );
+
+    console.log('[TradeVision] BUY:', {
+      candidato: buyV3.candidate,
+      trades: buyV3.candidateTrades,
+      winRate: buyV3.candidateWinRate,
+      netProfit: buyV3.candidateNetProfit,
+      profitFactor: buyV3.candidateProfitFactor,
+      maxDrawdown: buyV3.candidateMaxDrawdownMoney,
+      janelasComTrades: buyV3.windowsWithFilteredTrades,
+      janelasPositivas: buyV3.positiveWindows,
+      melhorouNet: buyV3.improvedNetWindows,
+      melhorouPF: buyV3.improvedPFWindows,
+      reduziuDD: buyV3.reducedDDWindows,
+      aprovado: buyV3.passConsistency,
     });
+
+    console.log('[TradeVision] SELL:', {
+      candidato: sellV3.candidate,
+      trades: sellV3.candidateTrades,
+      winRate: sellV3.candidateWinRate,
+      netProfit: sellV3.candidateNetProfit,
+      profitFactor: sellV3.candidateProfitFactor,
+      maxDrawdown: sellV3.candidateMaxDrawdownMoney,
+      janelasComTrades: sellV3.windowsWithFilteredTrades,
+      janelasPositivas: sellV3.positiveWindows,
+      melhorouNet: sellV3.improvedNetWindows,
+      melhorouPF: sellV3.improvedPFWindows,
+      reduziuDD: sellV3.reducedDDWindows,
+      aprovado: sellV3.passConsistency,
+    });
+
+    console.log(
+      '[TradeVision] WDO ROBUSTEZ V3 — DECISÃO:',
+      finalDecision,
+    );
 
     console.log(
       '[TradeVision] WDO ROBUSTEZ V3 — FIM',
       'Validação somente. Nenhum candidato foi aplicado à estratégia.',
+    );
+
+    console.log(
+      '[TradeVision] ========================================',
     );
   }
 
