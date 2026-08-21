@@ -73,7 +73,7 @@ import {
 } from '@/services/demoOrderHistory';
 
 import { useStore } from '@/store';
-import { formatPrice } from '@/lib/assets';
+import { ASSETS, formatPrice } from '@/lib/assets';
 import { analyzeFibonacci } from '@/lib/fibonacci';
 
 import {
@@ -138,6 +138,113 @@ type BrokerActionState =
 interface BrokerFeedback {
   tone: 'neutral' | 'success' | 'error';
   message: string;
+}
+
+type Wdo5PaperTradeResult =
+  | 'OPEN'
+  | 'WIN'
+  | 'LOSS';
+
+interface Wdo5PaperTrade {
+  id: string;
+  side: 'BUY';
+  signalTime: string;
+  entryTime: string;
+  exitTime: string | null;
+  score: number;
+  confidence: number;
+  entry: number;
+  stop: number;
+  target: number;
+  exit: number | null;
+  result: Wdo5PaperTradeResult;
+  closeReason: 'TARGET' | 'STOP' | null;
+  pnlPoints: number;
+  pnlMoney: number;
+}
+
+interface Wdo5PaperState {
+  version: 1;
+  startedAt: number;
+  lastSeenCandleTime: string | null;
+  trades: Wdo5PaperTrade[];
+  frozen: {
+    asset: 'WDO';
+    timeframe: '5m';
+    side: 'BUY';
+    scoreMin: 60;
+    confidenceMin: 65;
+    trend: 'ALTA';
+    targetTrades: 50;
+  };
+}
+
+const WDO5_PAPER_STORAGE_KEY =
+  'tradevision:wdo5:paper:v1';
+
+const WDO5_PAPER_TARGET_TRADES = 50;
+
+function createEmptyWdo5PaperState(): Wdo5PaperState {
+  return {
+    version: 1,
+    startedAt: Date.now(),
+    lastSeenCandleTime: null,
+    trades: [],
+    frozen: {
+      asset: 'WDO',
+      timeframe: '5m',
+      side: 'BUY',
+      scoreMin: 60,
+      confidenceMin: 65,
+      trend: 'ALTA',
+      targetTrades:
+        WDO5_PAPER_TARGET_TRADES,
+    },
+  };
+}
+
+function loadWdo5PaperState(): Wdo5PaperState {
+  if (typeof window === 'undefined') {
+    return createEmptyWdo5PaperState();
+  }
+
+  try {
+    const raw =
+      window.localStorage.getItem(
+        WDO5_PAPER_STORAGE_KEY,
+      );
+
+    if (!raw) {
+      return createEmptyWdo5PaperState();
+    }
+
+    const parsed =
+      JSON.parse(raw) as Wdo5PaperState;
+
+    if (
+      parsed?.version !== 1 ||
+      !Array.isArray(parsed.trades)
+    ) {
+      return createEmptyWdo5PaperState();
+    }
+
+    return parsed;
+  } catch {
+    return createEmptyWdo5PaperState();
+  }
+}
+
+function saveWdo5PaperState(
+  state: Wdo5PaperState,
+): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(
+    WDO5_PAPER_STORAGE_KEY,
+    JSON.stringify(state),
+  );
 }
 
 export default function AnalysisScreen({
@@ -210,6 +317,11 @@ export default function AnalysisScreen({
   const [backtestLoading, setBacktestLoading] =
     useState(false);
 
+  const [wdo5Paper, setWdo5Paper] =
+    useState<Wdo5PaperState>(
+      () => loadWdo5PaperState(),
+    );
+
   const fibonacciAnalysis = useMemo(
     () => analyzeFibonacci(candles),
     [candles],
@@ -272,6 +384,87 @@ export default function AnalysisScreen({
       },
     );
   }, [preparedOrder]);
+
+  const wdo5PaperSummary = useMemo(() => {
+    const closed =
+      wdo5Paper.trades.filter(
+        (trade) =>
+          trade.result !== 'OPEN',
+      );
+
+    const open =
+      wdo5Paper.trades.filter(
+        (trade) =>
+          trade.result === 'OPEN',
+      );
+
+    const wins =
+      closed.filter(
+        (trade) =>
+          trade.result === 'WIN',
+      );
+
+    const losses =
+      closed.filter(
+        (trade) =>
+          trade.result === 'LOSS',
+      );
+
+    const grossProfit =
+      wins.reduce(
+        (sum, trade) =>
+          sum + Math.max(0, trade.pnlMoney),
+        0,
+      );
+
+    const grossLoss =
+      losses.reduce(
+        (sum, trade) =>
+          sum + Math.abs(
+            Math.min(0, trade.pnlMoney),
+          ),
+        0,
+      );
+
+    const netPnl =
+      closed.reduce(
+        (sum, trade) =>
+          sum + trade.pnlMoney,
+        0,
+      );
+
+    const completed =
+      closed.length;
+
+    return {
+      completed,
+      open: open.length,
+      wins: wins.length,
+      losses: losses.length,
+      winRate:
+        completed > 0
+          ? (wins.length / completed) * 100
+          : 0,
+      netPnl,
+      profitFactor:
+        grossLoss > 0
+          ? grossProfit / grossLoss
+          : grossProfit > 0
+            ? Number.POSITIVE_INFINITY
+            : 0,
+      expectancy:
+        completed > 0
+          ? netPnl / completed
+          : 0,
+      progressPct:
+        Math.min(
+          100,
+          (completed /
+            WDO5_PAPER_TARGET_TRADES) *
+            100,
+        ),
+    };
+  }, [wdo5Paper]);
 
   async function run() {
     setLoading(true);
@@ -500,6 +693,509 @@ export default function AnalysisScreen({
     } finally {
       setBrokerActionState('IDLE');
     }
+  }
+
+  function handleResetWdo5Paper() {
+    const next =
+      createEmptyWdo5PaperState();
+
+    /*
+     * O baseline será armado no candle mais recente
+     * no próximo ciclo do efeito de paper trading.
+     */
+    setWdo5Paper(next);
+    saveWdo5PaperState(next);
+
+    console.log(
+      '[TradeVision] WDO 5M PAPER V1 — RESET',
+      'Nova sessão criada. O baseline será definido no candle mais recente.',
+    );
+  }
+
+  function processWdo5PaperTrading(
+    currentCandles: Candle[],
+  ) {
+    if (
+      asset !== 'WDO' ||
+      timeframe !== '5m' ||
+      currentCandles.length < 122
+    ) {
+      return;
+    }
+
+    setWdo5Paper((previous) => {
+      let next: Wdo5PaperState = {
+        ...previous,
+        trades: previous.trades.map(
+          (trade) => ({ ...trade }),
+        ),
+      };
+
+      const latestCandle =
+        currentCandles[
+          currentCandles.length - 1
+        ];
+
+      if (!latestCandle) {
+        return previous;
+      }
+
+      const latestTime =
+        String(latestCandle.time);
+
+      /*
+       * PRIMEIRA EXECUÇÃO:
+       * arma o paper trading daqui para frente.
+       * Nenhum candle histórico anterior é usado como
+       * operação "nova", preservando o out-of-sample.
+       */
+      if (!next.lastSeenCandleTime) {
+        next = {
+          ...next,
+          startedAt: Date.now(),
+          lastSeenCandleTime:
+            latestTime,
+        };
+
+        saveWdo5PaperState(next);
+
+        console.log(
+          '[TradeVision] WDO 5M PAPER V1 — ARMADO',
+          {
+            baselineCandle:
+              latestTime,
+            regra:
+              'BUY | score >= 60 | confidence >= 65 | tendência ALTA',
+            targetTrades:
+              WDO5_PAPER_TARGET_TRADES,
+            observacao:
+              'Somente candles posteriores ao baseline serão contabilizados.',
+          },
+        );
+
+        return next;
+      }
+
+      const baselineIndex =
+        currentCandles.findIndex(
+          (candle) =>
+            String(candle.time) ===
+            next.lastSeenCandleTime,
+        );
+
+      /*
+       * Se o provider removeu o candle-base da janela,
+       * não tentamos adivinhar histórico. Reancoramos no
+       * candle atual para impedir backfill acidental.
+       */
+      if (baselineIndex < 0) {
+        next = {
+          ...next,
+          lastSeenCandleTime:
+            latestTime,
+        };
+
+        saveWdo5PaperState(next);
+
+        console.warn(
+          '[TradeVision] WDO 5M PAPER V1 — REANCORADO',
+          'Baseline antigo não encontrado. Sessão preservada sem backfill.',
+        );
+
+        return next;
+      }
+
+      if (
+        baselineIndex >=
+        currentCandles.length - 1
+      ) {
+        return previous;
+      }
+
+      const moneyPerPoint =
+        ASSETS.WDO.tickValue /
+        ASSETS.WDO.tick;
+
+      let openTrade =
+        next.trades.find(
+          (trade) =>
+            trade.result === 'OPEN',
+        ) ?? null;
+
+      /*
+       * Cada candle NOVO confirma o candle anterior.
+       * O sinal é calculado no candle anterior e,
+       * se aprovado, entra no OPEN do candle novo.
+       * Isso evita look-ahead.
+       */
+      for (
+        let currentIndex =
+          baselineIndex + 1;
+        currentIndex <
+        currentCandles.length;
+        currentIndex += 1
+      ) {
+        const currentCandle =
+          currentCandles[currentIndex];
+
+        if (!currentCandle) {
+          continue;
+        }
+
+        const hadOpenAtStart =
+          Boolean(openTrade);
+
+        /*
+         * Primeiro gerenciamos eventual posição que já
+         * estava aberta ANTES do candle atual.
+         */
+        if (openTrade) {
+          const hitStop =
+            currentCandle.low <=
+            openTrade.stop;
+
+          const hitTarget =
+            currentCandle.high >=
+            openTrade.target;
+
+          if (hitStop || hitTarget) {
+            /*
+             * Se stop e alvo ocorrerem no mesmo candle,
+             * adotamos STOP por conservadorismo, pois
+             * OHLC não informa a ordem intrabar.
+             */
+            const closeAtStop =
+              hitStop;
+
+            const exit =
+              closeAtStop
+                ? openTrade.stop
+                : openTrade.target;
+
+            const pnlPoints =
+              exit -
+              openTrade.entry;
+
+            const closedTrade:
+              Wdo5PaperTrade = {
+              ...openTrade,
+              exitTime:
+                String(
+                  currentCandle.time,
+                ),
+              exit,
+              result:
+                pnlPoints > 0
+                  ? 'WIN'
+                  : 'LOSS',
+              closeReason:
+                closeAtStop
+                  ? 'STOP'
+                  : 'TARGET',
+              pnlPoints,
+              pnlMoney:
+                pnlPoints *
+                moneyPerPoint,
+            };
+
+            next.trades =
+              next.trades.map(
+                (trade) =>
+                  trade.id ===
+                  closedTrade.id
+                    ? closedTrade
+                    : trade,
+              );
+
+            openTrade = null;
+
+            console.log(
+              '[TradeVision] WDO 5M PAPER V1 — FECHAMENTO',
+              closedTrade,
+            );
+          }
+        }
+
+        /*
+         * Se havia posição aberta no início do candle,
+         * não abrimos outra no mesmo OPEN, mesmo que a
+         * posição anterior tenha encerrado intrabar.
+         */
+        if (hadOpenAtStart) {
+          continue;
+        }
+
+        if (
+          next.trades.filter(
+            (trade) =>
+              trade.result !== 'OPEN',
+          ).length >=
+          WDO5_PAPER_TARGET_TRADES
+        ) {
+          continue;
+        }
+
+        const signalIndex =
+          currentIndex - 1;
+
+        if (signalIndex < 120) {
+          continue;
+        }
+
+        const historicalCandles =
+          currentCandles.slice(
+            signalIndex - 120,
+            signalIndex + 1,
+          );
+
+        const analysis =
+          buildHistoricalAnalysis(
+            'WDO',
+            '5m',
+            historicalCandles,
+          );
+
+        const baseDecision =
+          evaluateAnalysis(analysis);
+
+        const eligible =
+          analysis.finalSignal === 'BUY' &&
+          analysis.trend === 'ALTA' &&
+          analysis.score >= 60 &&
+          baseDecision.confidence >= 65;
+
+        if (!eligible) {
+          continue;
+        }
+
+        const candidateDecision = {
+          action: 'BUY' as const,
+          confidence:
+            baseDecision.confidence,
+          reason:
+            'WDO 5M PAPER V1 — regra congelada score >= 60, confidence >= 65 e tendência ALTA.',
+        };
+
+        const candidateOrder =
+          prepareOrder(
+            analysis,
+            candidateDecision,
+          );
+
+        const candidateRisk =
+          evaluateOrderRisk(
+            candidateOrder,
+            DEFAULT_RISK_RULES,
+            {
+              dailyPnl: 0,
+              openPositions: 0,
+            },
+          );
+
+        if (
+          candidateOrder.status !==
+            'READY' ||
+          candidateOrder.side !==
+            'BUY' ||
+          candidateRisk.decision !==
+            'APPROVED' ||
+          candidateRisk.quantity < 1
+        ) {
+          continue;
+        }
+
+        const originalEntry =
+          candidateOrder.entry;
+
+        const stopDistance =
+          Math.abs(
+            originalEntry -
+              candidateOrder.stop,
+          );
+
+        const targetDistance =
+          Math.abs(
+            candidateOrder.target -
+              originalEntry,
+          );
+
+        const entry =
+          currentCandle.open;
+
+        const newTrade:
+          Wdo5PaperTrade = {
+          id:
+            crypto.randomUUID?.() ??
+            `wdo5-paper-${Date.now()}-${currentIndex}`,
+          side: 'BUY',
+          signalTime:
+            String(
+              currentCandles[
+                signalIndex
+              ]?.time ?? '',
+            ),
+          entryTime:
+            String(
+              currentCandle.time,
+            ),
+          exitTime: null,
+          score: analysis.score,
+          confidence:
+            baseDecision.confidence,
+          entry,
+          stop:
+            entry - stopDistance,
+          target:
+            entry + targetDistance,
+          exit: null,
+          result: 'OPEN',
+          closeReason: null,
+          pnlPoints: 0,
+          pnlMoney: 0,
+        };
+
+        next.trades = [
+          ...next.trades,
+          newTrade,
+        ];
+
+        openTrade = newTrade;
+
+        console.log(
+          '[TradeVision] WDO 5M PAPER V1 — NOVA OPERAÇÃO',
+          newTrade,
+        );
+
+        /*
+         * A entrada ocorre no OPEN do candle atual.
+         * Depois da entrada, o próprio candle pode
+         * atingir stop/alvo. Em caso de ambos, STOP.
+         */
+        const hitStopOnEntry =
+          currentCandle.low <=
+          newTrade.stop;
+
+        const hitTargetOnEntry =
+          currentCandle.high >=
+          newTrade.target;
+
+        if (
+          hitStopOnEntry ||
+          hitTargetOnEntry
+        ) {
+          const closeAtStop =
+            hitStopOnEntry;
+
+          const exit =
+            closeAtStop
+              ? newTrade.stop
+              : newTrade.target;
+
+          const pnlPoints =
+            exit -
+            newTrade.entry;
+
+          const closedTrade:
+            Wdo5PaperTrade = {
+            ...newTrade,
+            exitTime:
+              String(
+                currentCandle.time,
+              ),
+            exit,
+            result:
+              pnlPoints > 0
+                ? 'WIN'
+                : 'LOSS',
+            closeReason:
+              closeAtStop
+                ? 'STOP'
+                : 'TARGET',
+            pnlPoints,
+            pnlMoney:
+              pnlPoints *
+              moneyPerPoint,
+          };
+
+          next.trades =
+            next.trades.map(
+              (trade) =>
+                trade.id ===
+                closedTrade.id
+                  ? closedTrade
+                  : trade,
+            );
+
+          openTrade = null;
+
+          console.log(
+            '[TradeVision] WDO 5M PAPER V1 — FECHAMENTO NO CANDLE DE ENTRADA',
+            closedTrade,
+          );
+        }
+      }
+
+      next = {
+        ...next,
+        lastSeenCandleTime:
+          latestTime,
+      };
+
+      saveWdo5PaperState(next);
+
+      const closed =
+        next.trades.filter(
+          (trade) =>
+            trade.result !== 'OPEN',
+        );
+
+      const wins =
+        closed.filter(
+          (trade) =>
+            trade.result === 'WIN',
+        ).length;
+
+      const net =
+        closed.reduce(
+          (sum, trade) =>
+            sum + trade.pnlMoney,
+          0,
+        );
+
+      console.log(
+        '[TradeVision] WDO 5M PAPER V1 — STATUS',
+        {
+          completed:
+            closed.length,
+          target:
+            WDO5_PAPER_TARGET_TRADES,
+          openTrades:
+            next.trades.filter(
+              (trade) =>
+                trade.result === 'OPEN',
+            ).length,
+          wins,
+          losses:
+            closed.length - wins,
+          winRate:
+            closed.length > 0
+              ? (wins /
+                  closed.length) *
+                100
+              : 0,
+          netPnl:
+            net,
+          remaining:
+            Math.max(
+              0,
+              WDO5_PAPER_TARGET_TRADES -
+                closed.length,
+            ),
+        },
+      );
+
+      return next;
+    });
   }
 
   async function handleRunBacktest() {
@@ -3516,6 +4212,40 @@ export default function AnalysisScreen({
     );
   }, [result, candles, multiTimeframe]);
 
+  useEffect(() => {
+    processWdo5PaperTrading(candles);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset, timeframe, candles]);
+
+  useEffect(() => {
+    if (
+      asset !== 'WDO' ||
+      timeframe !== '5m'
+    ) {
+      return;
+    }
+
+    /*
+     * Polling leve para detectar fechamento de candle novo.
+     * O motor de paper trading usa o timestamp para evitar
+     * duplicar candles/operações.
+     */
+    const interval =
+      window.setInterval(
+        () => {
+          void run();
+        },
+        60_000,
+      );
+
+    return () => {
+      window.clearInterval(interval);
+    };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset, timeframe]);
+
   return (
     <div className="space-y-5">
       <section className="animate-fade-up">
@@ -3683,6 +4413,228 @@ export default function AnalysisScreen({
               rules={DEFAULT_RISK_RULES}
             />
           )}
+
+          {asset === 'WDO' &&
+            timeframe === '5m' && (
+              <section className="card animate-fade-up p-4 sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-white">
+                        WDO 5m — Paper Trading V1
+                      </h3>
+
+                      <span className="rounded-full bg-bull-500/10 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-bull-400">
+                        Regra congelada
+                      </span>
+                    </div>
+
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                      BUY • score ≥ 60 • confiança ≥ 65 • tendência ALTA • 1 contrato • meta de 50 operações novas
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleResetWdo5Paper}
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 transition hover:border-slate-600 hover:text-slate-200"
+                  >
+                    Reiniciar sessão
+                  </button>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <MiniStat
+                    label="Concluídas"
+                    value={`${wdo5PaperSummary.completed}/50`}
+                    tone={
+                      wdo5PaperSummary.completed >= 50
+                        ? 'bull'
+                        : 'wait'
+                    }
+                  />
+
+                  <MiniStat
+                    label="Abertas"
+                    value={`${wdo5PaperSummary.open}`}
+                  />
+
+                  <MiniStat
+                    label="Win rate"
+                    value={`${wdo5PaperSummary.winRate.toFixed(1)}%`}
+                    tone={
+                      wdo5PaperSummary.completed > 0
+                        ? wdo5PaperSummary.winRate >= 50
+                          ? 'bull'
+                          : 'bear'
+                        : 'wait'
+                    }
+                  />
+
+                  <MiniStat
+                    label="P&L"
+                    value={`R$ ${wdo5PaperSummary.netPnl.toFixed(2)}`}
+                    tone={
+                      wdo5PaperSummary.netPnl > 0
+                        ? 'bull'
+                        : wdo5PaperSummary.netPnl < 0
+                          ? 'bear'
+                          : 'wait'
+                    }
+                  />
+
+                  <MiniStat
+                    label="Wins"
+                    value={`${wdo5PaperSummary.wins}`}
+                    tone="bull"
+                  />
+
+                  <MiniStat
+                    label="Losses"
+                    value={`${wdo5PaperSummary.losses}`}
+                    tone="bear"
+                  />
+
+                  <MiniStat
+                    label="Profit Factor"
+                    value={
+                      Number.isFinite(
+                        wdo5PaperSummary.profitFactor,
+                      )
+                        ? wdo5PaperSummary.profitFactor.toFixed(2)
+                        : '∞'
+                    }
+                  />
+
+                  <MiniStat
+                    label="Expectativa"
+                    value={`R$ ${wdo5PaperSummary.expectancy.toFixed(2)}`}
+                    tone={
+                      wdo5PaperSummary.expectancy > 0
+                        ? 'bull'
+                        : wdo5PaperSummary.expectancy < 0
+                          ? 'bear'
+                          : 'wait'
+                    }
+                  />
+                </div>
+
+                <div className="mt-4">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                      Progresso da amostra
+                    </span>
+
+                    <span className="font-mono text-[11px] font-bold text-slate-300">
+                      {wdo5PaperSummary.progressPct.toFixed(0)}%
+                    </span>
+                  </div>
+
+                  <ProgressBar
+                    value={wdo5PaperSummary.progressPct}
+                    tone="accent"
+                  />
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-left text-[10px]">
+                    <thead className="text-slate-600">
+                      <tr>
+                        <th className="px-2 py-2">#</th>
+                        <th className="px-2 py-2">Entrada</th>
+                        <th className="px-2 py-2">Score</th>
+                        <th className="px-2 py-2">Conf.</th>
+                        <th className="px-2 py-2">Preço</th>
+                        <th className="px-2 py-2">Stop</th>
+                        <th className="px-2 py-2">Alvo</th>
+                        <th className="px-2 py-2">Status</th>
+                        <th className="px-2 py-2">P&L</th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-ink-700/60">
+                      {wdo5Paper.trades
+                        .slice(-10)
+                        .reverse()
+                        .map((trade, index) => (
+                          <tr
+                            key={trade.id}
+                            className="text-slate-300"
+                          >
+                            <td className="px-2 py-2 font-mono">
+                              {wdo5Paper.trades.length - index}
+                            </td>
+
+                            <td className="px-2 py-2 font-mono">
+                              {trade.entryTime}
+                            </td>
+
+                            <td className="px-2 py-2 font-mono">
+                              {trade.score}
+                            </td>
+
+                            <td className="px-2 py-2 font-mono">
+                              {trade.confidence}%
+                            </td>
+
+                            <td className="px-2 py-2 font-mono">
+                              {formatPrice(
+                                'WDO',
+                                trade.entry,
+                              )}
+                            </td>
+
+                            <td className="px-2 py-2 font-mono">
+                              {formatPrice(
+                                'WDO',
+                                trade.stop,
+                              )}
+                            </td>
+
+                            <td className="px-2 py-2 font-mono">
+                              {formatPrice(
+                                'WDO',
+                                trade.target,
+                              )}
+                            </td>
+
+                            <td
+                              className={`px-2 py-2 font-bold ${
+                                trade.result === 'WIN'
+                                  ? 'text-bull-400'
+                                  : trade.result === 'LOSS'
+                                    ? 'text-bear-400'
+                                    : 'text-wait-400'
+                              }`}
+                            >
+                              {trade.result}
+                            </td>
+
+                            <td
+                              className={`px-2 py-2 font-mono font-bold ${
+                                trade.pnlMoney > 0
+                                  ? 'text-bull-400'
+                                  : trade.pnlMoney < 0
+                                    ? 'text-bear-400'
+                                    : 'text-slate-400'
+                              }`}
+                            >
+                              R$ {trade.pnlMoney.toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {wdo5PaperSummary.completed >=
+                  WDO5_PAPER_TARGET_TRADES && (
+                  <div className="mt-4 rounded-xl border border-bull-500/30 bg-bull-500/10 p-3 text-xs font-semibold text-bull-300">
+                    Meta de 50 operações concluída. Não altere a estratégia antes de comparar o resultado OOS com o backtest aprovado.
+                  </div>
+                )}
+              </section>
+            )}
 
           <BacktestPanel
             result={backtestResult}
