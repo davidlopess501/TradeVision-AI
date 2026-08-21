@@ -1034,6 +1034,363 @@ export default function AnalysisScreen({
       return;
     }
 
+    /*
+     * WDO 5M BASE V1
+     *
+     * Estratégia totalmente congelada: nenhum filtro do WDO 15m é aplicado.
+     * Usa os candles já carregados pelo provider para o timeframe de 5 minutos.
+     * Objetivo: medir a base BUY x SELL com uma amostra maior e walk-forward.
+     */
+    const isWdo5mBaseV1 =
+      asset === 'WDO' &&
+      timeframe === '5m';
+
+    if (isWdo5mBaseV1) {
+      /*
+       * O provider já solicita até 30.000 candles em run().
+       * Limitamos o laboratório aos 12.000 candles mais recentes para
+       * manter o teste leve no navegador sem perder uma amostra ampla.
+       */
+      const MAX_WDO5_CANDLES = 12000;
+      const testCandles =
+        candles.length > MAX_WDO5_CANDLES
+          ? candles.slice(-MAX_WDO5_CANDLES)
+          : candles;
+
+      const windowSize = 2000;
+      const minimumWindowCandles = 1200;
+
+      if (testCandles.length < windowSize * 3) {
+        console.warn(
+          `[TradeVision] WDO 5m BASE V1 requer pelo menos ${
+            windowSize * 3
+          } candles. Recebidos: ${testCandles.length}. Rode/atualize a análise do WDO 5m primeiro.`,
+        );
+        return;
+      }
+
+      setBacktestLoading(true);
+
+      try {
+        const windows: Candle[][] = [];
+
+        for (
+          let startIndex = 0;
+          startIndex < testCandles.length;
+          startIndex += windowSize
+        ) {
+          const windowCandles =
+            testCandles.slice(
+              startIndex,
+              Math.min(
+                startIndex + windowSize,
+                testCandles.length,
+              ),
+            );
+
+          if (
+            windowCandles.length >=
+            minimumWindowCandles
+          ) {
+            windows.push(windowCandles);
+          }
+        }
+
+        const moderateCosts =
+          costScenarios.MODERADO;
+
+        const [buyFull, sellFull] =
+          await Promise.all([
+            runBacktestV2({
+              asset: 'WDO',
+              timeframe: '5m',
+              initialCapital: 10000,
+              candles: testCandles,
+              strategyMode: 'BUY_ONLY',
+              executionCosts: moderateCosts,
+            }),
+            runBacktestV2({
+              asset: 'WDO',
+              timeframe: '5m',
+              initialCapital: 10000,
+              candles: testCandles,
+              strategyMode: 'SELL_ONLY',
+              executionCosts: moderateCosts,
+            }),
+          ]);
+
+        const row = (
+          result: BacktestResult,
+        ) => ({
+          trades: result.totalTrades,
+          winRate: result.winRate,
+          netProfit: result.netProfit,
+          profitFactor: result.profitFactor,
+          maxDrawdown: result.maxDrawdown,
+        });
+
+        const buyWindows: BacktestResult[] = [];
+        const sellWindows: BacktestResult[] = [];
+
+        for (const windowCandles of windows) {
+          const [buy, sell] =
+            await Promise.all([
+              runBacktestV2({
+                asset: 'WDO',
+                timeframe: '5m',
+                initialCapital: 10000,
+                candles: windowCandles,
+                strategyMode: 'BUY_ONLY',
+                executionCosts: moderateCosts,
+              }),
+              runBacktestV2({
+                asset: 'WDO',
+                timeframe: '5m',
+                initialCapital: 10000,
+                candles: windowCandles,
+                strategyMode: 'SELL_ONLY',
+                executionCosts: moderateCosts,
+              }),
+            ]);
+
+          buyWindows.push(buy);
+          sellWindows.push(sell);
+        }
+
+        const summarize = (
+          results: BacktestResult[],
+        ) => {
+          const positiveWindows =
+            results.filter(
+              (result) => result.netProfit > 0,
+            ).length;
+
+          const negativeWindows =
+            results.filter(
+              (result) => result.netProfit < 0,
+            ).length;
+
+          return {
+            windows: results.length,
+            positiveWindows,
+            negativeWindows,
+            positiveRate:
+              results.length > 0
+                ? (positiveWindows /
+                    results.length) *
+                  100
+                : 0,
+            totalTrades:
+              results.reduce(
+                (total, result) =>
+                  total + result.totalTrades,
+                0,
+              ),
+            totalNetProfit:
+              results.reduce(
+                (total, result) =>
+                  total + result.netProfit,
+                0,
+              ),
+            worstDrawdown:
+              results.reduce(
+                (max, result) =>
+                  Math.max(
+                    max,
+                    result.maxDrawdown,
+                  ),
+                0,
+              ),
+          };
+        };
+
+        const buyWalkForward =
+          summarize(buyWindows);
+        const sellWalkForward =
+          summarize(sellWindows);
+
+        /*
+         * Critério congelado da BASE V1.
+         * Não otimiza parâmetros; apenas decide se cada lado merece
+         * avançar para um laboratório específico de 5m.
+         */
+        const minimumTrades = 50;
+        const minimumProfitFactor = 1.05;
+        const minimumPositiveWindowRate = 50;
+
+        const evaluateBase = (
+          full: BacktestResult,
+          walkForward: ReturnType<
+            typeof summarize
+          >,
+        ) => {
+          const enoughTrades =
+            full.totalTrades >= minimumTrades;
+          const profitable =
+            full.netProfit > 0;
+          const pfOk =
+            full.profitFactor >=
+            minimumProfitFactor;
+          const walkForwardOk =
+            walkForward.windows >= 3 &&
+            walkForward.positiveRate >=
+              minimumPositiveWindowRate;
+
+          const approved =
+            enoughTrades &&
+            profitable &&
+            pfOk &&
+            walkForwardOk;
+
+          return {
+            trades: full.totalTrades,
+            winRate: full.winRate,
+            netProfit: full.netProfit,
+            profitFactor:
+              full.profitFactor,
+            maxDrawdown:
+              full.maxDrawdown,
+            walkForwardWindows:
+              walkForward.windows,
+            walkForwardPositiveWindows:
+              walkForward.positiveWindows,
+            walkForwardPositiveRate:
+              walkForward.positiveRate,
+            walkForwardTotalTrades:
+              walkForward.totalTrades,
+            enoughTrades,
+            profitable,
+            pfOk,
+            walkForwardOk,
+            approved,
+          };
+        };
+
+        const buyVerdict =
+          evaluateBase(
+            buyFull,
+            buyWalkForward,
+          );
+        const sellVerdict =
+          evaluateBase(
+            sellFull,
+            sellWalkForward,
+          );
+
+        const finalDecision =
+          buyVerdict.approved &&
+          sellVerdict.approved
+            ? 'BUY E SELL — BASE PROMISSORA PARA LAB 5M'
+            : buyVerdict.approved
+              ? 'BUY — BASE PROMISSORA PARA LAB 5M'
+              : sellVerdict.approved
+                ? 'SELL — BASE PROMISSORA PARA LAB 5M'
+                : 'BASE NÃO APROVADA — NÃO OTIMIZAR AINDA';
+
+        console.clear();
+        console.group(
+          '[TradeVision] WDO 5M BASE V1 — BUY × SELL',
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BASE V1 — FONTE',
+          {
+            asset: 'WDO',
+            timeframe: '5m',
+            source:
+              'Market Data Provider — candles carregados na tela',
+            candlesDisponiveis:
+              candles.length,
+            candlesTestados:
+              testCandles.length,
+            executionCosts:
+              'MODERADO',
+            strategy:
+              'CONGELADA — sem filtros experimentais do 15m',
+            windowSize,
+            validWindows:
+              windows.length,
+          },
+        );
+
+        console.table({
+          'WDO5 BUY_ONLY — BASE':
+            row(buyFull),
+          'WDO5 SELL_ONLY — BASE':
+            row(sellFull),
+        });
+
+        console.log(
+          '[TradeVision] WDO5 WALK-FORWARD BUY',
+          buyWalkForward,
+        );
+
+        console.log(
+          '[TradeVision] WDO5 WALK-FORWARD SELL',
+          sellWalkForward,
+        );
+
+        console.table(
+          Object.fromEntries(
+            windows.flatMap(
+              (_, index) => [
+                [
+                  `W${index + 1} — BUY`,
+                  row(buyWindows[index]),
+                ],
+                [
+                  `W${index + 1} — SELL`,
+                  row(sellWindows[index]),
+                ],
+              ],
+            ),
+          ),
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BASE V1 — CRITÉRIOS',
+          {
+            minimumTrades,
+            minimumProfitFactor,
+            minimumPositiveWindowRate,
+          },
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BASE V1 — BUY — VEREDITO',
+          buyVerdict,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BASE V1 — SELL — VEREDITO',
+          sellVerdict,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BASE V1 — DECISÃO:',
+          finalDecision,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BASE V1 — FIM',
+          'Validação de base somente. Nenhuma regra foi aplicada à estratégia.',
+        );
+
+        console.groupEnd();
+
+        setBacktestResult(
+          buyFull.netProfit >=
+          sellFull.netProfit
+            ? buyFull
+            : sellFull,
+        );
+      } finally {
+        setBacktestLoading(false);
+      }
+
+      return;
+    }
+
     const isRealWdo15m =
       asset === 'WDO' &&
       timeframe === '15m';
