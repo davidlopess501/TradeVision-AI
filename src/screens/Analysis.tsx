@@ -2000,6 +2000,294 @@ export default function AnalysisScreen({
           'Validação somente. O threshold global do Decision Engine continua em 65.',
         );
 
+
+        /*
+         * WDO 5M BUY — ROBUSTEZ V5
+         *
+         * Candidato congelado: score >= 60.
+         * O Decision Engine global permanece inalterado.
+         *
+         * Testes:
+         * 1) janelas de 1000, 2000 e 3000 candles;
+         * 2) custos BASE, STRESS 1 e STRESS 2;
+         * 3) lucro, PF, drawdown e cobertura temporal;
+         * 4) veredito conservador antes de qualquer promoção.
+         */
+        const v5CostScenarios = [
+          {
+            name: 'BASE',
+            costs: moderateCosts,
+          },
+          {
+            name: 'STRESS_1',
+            costs: {
+              slippageTicksPerSide:
+                (moderateCosts.slippageTicksPerSide ?? 0) + 1,
+              fixedCostPerContractRoundTrip:
+                (moderateCosts.fixedCostPerContractRoundTrip ?? 0) + 1,
+            },
+          },
+          {
+            name: 'STRESS_2',
+            costs: {
+              slippageTicksPerSide:
+                (moderateCosts.slippageTicksPerSide ?? 0) + 2,
+              fixedCostPerContractRoundTrip:
+                (moderateCosts.fixedCostPerContractRoundTrip ?? 0) + 2,
+            },
+          },
+        ];
+
+        const v5WindowSizes = [1000, 2000, 3000];
+
+        type V5WindowRow = {
+          scenario: string;
+          windowSize: number;
+          window: number;
+          candleStart: number;
+          candleEnd: number;
+          trades: number;
+          winRate: number;
+          netProfit: number;
+          profitFactor: number;
+          maxDrawdown: number;
+          positive: boolean;
+          pfAboveOne: boolean;
+        };
+
+        const v5Rows: V5WindowRow[] = [];
+
+        for (const scenario of v5CostScenarios) {
+          for (const windowSize of v5WindowSizes) {
+            let windowNumber = 0;
+
+            for (
+              let start = 0;
+              start < testCandles.length;
+              start += windowSize
+            ) {
+              const windowCandles =
+                testCandles.slice(
+                  start,
+                  Math.min(
+                    start + windowSize,
+                    testCandles.length,
+                  ),
+                );
+
+              /*
+               * Evita avaliar fragmento final pequeno demais.
+               * Precisamos de histórico suficiente para indicadores
+               * e de uma janela minimamente representativa.
+               */
+              if (
+                windowCandles.length <
+                Math.min(500, windowSize)
+              ) {
+                continue;
+              }
+
+              windowNumber += 1;
+
+              const result =
+                await runBacktestV2({
+                  asset: 'WDO',
+                  timeframe: '5m',
+                  initialCapital: 10000,
+                  candles: windowCandles,
+                  strategyMode: 'BUY_ONLY',
+                  executionCosts: scenario.costs,
+                  buyScoreThreshold: 60,
+                });
+
+              v5Rows.push({
+                scenario: scenario.name,
+                windowSize,
+                window: windowNumber,
+                candleStart: start,
+                candleEnd:
+                  start +
+                  windowCandles.length -
+                  1,
+                trades: result.totalTrades,
+                winRate: result.winRate,
+                netProfit: result.netProfit,
+                profitFactor:
+                  result.profitFactor,
+                maxDrawdown:
+                  result.maxDrawdown,
+                positive:
+                  result.netProfit > 0,
+                pfAboveOne:
+                  result.profitFactor > 1,
+              });
+            }
+          }
+        }
+
+        const v5ScenarioSummary =
+          v5CostScenarios.map((scenario) => {
+            const rows = v5Rows.filter(
+              (row) =>
+                row.scenario === scenario.name,
+            );
+
+            const windowsWithTrades =
+              rows.filter(
+                (row) => row.trades > 0,
+              );
+
+            const positiveWindows =
+              windowsWithTrades.filter(
+                (row) => row.positive,
+              ).length;
+
+            const pfAboveOneWindows =
+              windowsWithTrades.filter(
+                (row) => row.pfAboveOne,
+              ).length;
+
+            const totalTrades =
+              windowsWithTrades.reduce(
+                (sum, row) =>
+                  sum + row.trades,
+                0,
+              );
+
+            return {
+              scenario: scenario.name,
+              windows: rows.length,
+              windowsWithTrades:
+                windowsWithTrades.length,
+              positiveWindows,
+              positiveRate:
+                windowsWithTrades.length > 0
+                  ? (positiveWindows /
+                      windowsWithTrades.length) *
+                    100
+                  : 0,
+              pfAboveOneWindows,
+              pfAboveOneRate:
+                windowsWithTrades.length > 0
+                  ? (pfAboveOneWindows /
+                      windowsWithTrades.length) *
+                    100
+                  : 0,
+              totalTrades,
+              totalNetProfit:
+                windowsWithTrades.reduce(
+                  (sum, row) =>
+                    sum + row.netProfit,
+                  0,
+                ),
+              worstDrawdown:
+                windowsWithTrades.reduce(
+                  (max, row) =>
+                    Math.max(
+                      max,
+                      row.maxDrawdown,
+                    ),
+                  0,
+                ),
+            };
+          });
+
+        const v5BaseSummary =
+          v5ScenarioSummary.find(
+            (item) =>
+              item.scenario === 'BASE',
+          );
+
+        const v5Stress1Summary =
+          v5ScenarioSummary.find(
+            (item) =>
+              item.scenario === 'STRESS_1',
+          );
+
+        const v5Stress2Summary =
+          v5ScenarioSummary.find(
+            (item) =>
+              item.scenario === 'STRESS_2',
+          );
+
+        const v5EnoughFullTrades =
+          buyScore60Full.totalTrades >= 50;
+
+        const v5FullProfitable =
+          buyScore60Full.netProfit > 0;
+
+        const v5FullPfOk =
+          buyScore60Full.profitFactor >= 1.20;
+
+        const v5BaseConsistency =
+          (v5BaseSummary?.positiveRate ?? 0) >= 55 &&
+          (v5BaseSummary?.pfAboveOneRate ?? 0) >= 50;
+
+        const v5Stress1Survives =
+          (v5Stress1Summary?.totalNetProfit ?? 0) > 0 &&
+          (v5Stress1Summary?.positiveRate ?? 0) >= 50;
+
+        const v5Stress2Survives =
+          (v5Stress2Summary?.totalNetProfit ?? 0) > 0;
+
+        const v5Approved =
+          v5EnoughFullTrades &&
+          v5FullProfitable &&
+          v5FullPfOk &&
+          v5BaseConsistency &&
+          v5Stress1Survives &&
+          v5Stress2Survives;
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — ROBUSTEZ V5 — JANELAS',
+        );
+        console.table(v5Rows);
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — ROBUSTEZ V5 — STRESS RESUMO',
+        );
+        console.table(v5ScenarioSummary);
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — ROBUSTEZ V5 — VEREDITO',
+          {
+            candidate: 'BUY score >= 60',
+            fullTrades:
+              buyScore60Full.totalTrades,
+            fullWinRate:
+              buyScore60Full.winRate,
+            fullNetProfit:
+              buyScore60Full.netProfit,
+            fullProfitFactor:
+              buyScore60Full.profitFactor,
+            fullMaxDrawdown:
+              buyScore60Full.maxDrawdown,
+            enoughFullTrades:
+              v5EnoughFullTrades,
+            fullProfitable:
+              v5FullProfitable,
+            fullPfOk:
+              v5FullPfOk,
+            baseConsistency:
+              v5BaseConsistency,
+            stress1Survives:
+              v5Stress1Survives,
+            stress2Survives:
+              v5Stress2Survives,
+            approved:
+              v5Approved,
+            verdict:
+              v5Approved
+                ? 'APROVADO NA ROBUSTEZ V5 — CANDIDATO PODE AVANÇAR PARA PROMOÇÃO CONTROLADA'
+                : 'NÃO APROVADO NA ROBUSTEZ V5 — NÃO PROMOVER SCORE 60',
+          },
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — ROBUSTEZ V5 — FIM',
+          'Validação somente. O threshold global do Decision Engine continua em 65.',
+        );
+
         console.log(
           '[TradeVision] WDO 5M BASE V1 — CRITÉRIOS',
           {
