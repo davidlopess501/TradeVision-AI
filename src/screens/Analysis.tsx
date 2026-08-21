@@ -1130,6 +1130,54 @@ export default function AnalysisScreen({
           confidenceTotal: 0,
         };
 
+        /*
+         * WDO 5M BUY — DECISION ENGINE DIAGNOSTIC V3
+         *
+         * Congelado / observacional:
+         * - não altera thresholds;
+         * - não altera stop/target;
+         * - não altera risco;
+         * - mede somente os sinais BUY e o motivo pelo qual viram BUY ou WAIT.
+         */
+        const buyDecisionV3 = {
+          buySignals: 0,
+          approvedBuy: 0,
+          rejectedBuy: 0,
+
+          trendAlta: 0,
+          trendLateral: 0,
+          trendBaixa: 0,
+
+          scoreBelow65: 0,
+          scoreAtLeast65: 0,
+          confidenceBelow65: 0,
+          confidenceAtLeast65: 0,
+
+          score60To64: 0,
+          score55To59: 0,
+          scoreBelow55: 0,
+
+          confidence60To64: 0,
+          confidence55To59: 0,
+          confidenceBelow55: 0,
+
+          trendOkScoreOkConfidenceOk: 0,
+          trendFailOnly: 0,
+          scoreFailOnly: 0,
+          confidenceFailOnly: 0,
+          multipleFails: 0,
+
+          reasons: {} as Record<string, number>,
+
+          rejectedScoreMin: Number.POSITIVE_INFINITY,
+          rejectedScoreMax: Number.NEGATIVE_INFINITY,
+          rejectedScoreTotal: 0,
+
+          rejectedConfidenceMin: Number.POSITIVE_INFINITY,
+          rejectedConfidenceMax: Number.NEGATIVE_INFINITY,
+          rejectedConfidenceTotal: 0,
+        };
+
         for (
           let diagnosticIndex = diagnosticWindowSize;
           diagnosticIndex < testCandles.length - 1;
@@ -1170,6 +1218,128 @@ export default function AnalysisScreen({
           );
           buyDiagnostic.confidenceTotal +=
             historicalDecision.confidence;
+
+          if (historicalAnalysis.finalSignal === 'BUY') {
+            buyDecisionV3.buySignals += 1;
+
+            const trendOk =
+              historicalAnalysis.trend === 'ALTA';
+            const scoreOk =
+              historicalAnalysis.score >= 65;
+            const confidenceOk =
+              historicalDecision.confidence >= 65;
+
+            if (historicalAnalysis.trend === 'ALTA') {
+              buyDecisionV3.trendAlta += 1;
+            } else if (
+              historicalAnalysis.trend === 'BAIXA'
+            ) {
+              buyDecisionV3.trendBaixa += 1;
+            } else {
+              buyDecisionV3.trendLateral += 1;
+            }
+
+            if (scoreOk) {
+              buyDecisionV3.scoreAtLeast65 += 1;
+            } else {
+              buyDecisionV3.scoreBelow65 += 1;
+
+              if (historicalAnalysis.score >= 60) {
+                buyDecisionV3.score60To64 += 1;
+              } else if (
+                historicalAnalysis.score >= 55
+              ) {
+                buyDecisionV3.score55To59 += 1;
+              } else {
+                buyDecisionV3.scoreBelow55 += 1;
+              }
+            }
+
+            if (confidenceOk) {
+              buyDecisionV3.confidenceAtLeast65 += 1;
+            } else {
+              buyDecisionV3.confidenceBelow65 += 1;
+
+              if (
+                historicalDecision.confidence >= 60
+              ) {
+                buyDecisionV3.confidence60To64 += 1;
+              } else if (
+                historicalDecision.confidence >= 55
+              ) {
+                buyDecisionV3.confidence55To59 += 1;
+              } else {
+                buyDecisionV3.confidenceBelow55 += 1;
+              }
+            }
+
+            if (
+              trendOk &&
+              scoreOk &&
+              confidenceOk
+            ) {
+              buyDecisionV3
+                .trendOkScoreOkConfidenceOk += 1;
+            } else {
+              const failedCriteria =
+                Number(!trendOk) +
+                Number(!scoreOk) +
+                Number(!confidenceOk);
+
+              if (failedCriteria > 1) {
+                buyDecisionV3.multipleFails += 1;
+              } else if (!trendOk) {
+                buyDecisionV3.trendFailOnly += 1;
+              } else if (!scoreOk) {
+                buyDecisionV3.scoreFailOnly += 1;
+              } else if (!confidenceOk) {
+                buyDecisionV3.confidenceFailOnly += 1;
+              }
+            }
+
+            if (historicalDecision.action === 'BUY') {
+              buyDecisionV3.approvedBuy += 1;
+            } else {
+              buyDecisionV3.rejectedBuy += 1;
+
+              buyDecisionV3.reasons[
+                historicalDecision.reason
+              ] =
+                (buyDecisionV3.reasons[
+                  historicalDecision.reason
+                ] ?? 0) + 1;
+
+              buyDecisionV3.rejectedScoreMin =
+                Math.min(
+                  buyDecisionV3.rejectedScoreMin,
+                  historicalAnalysis.score,
+                );
+
+              buyDecisionV3.rejectedScoreMax =
+                Math.max(
+                  buyDecisionV3.rejectedScoreMax,
+                  historicalAnalysis.score,
+                );
+
+              buyDecisionV3.rejectedScoreTotal +=
+                historicalAnalysis.score;
+
+              buyDecisionV3.rejectedConfidenceMin =
+                Math.min(
+                  buyDecisionV3.rejectedConfidenceMin,
+                  historicalDecision.confidence,
+                );
+
+              buyDecisionV3.rejectedConfidenceMax =
+                Math.max(
+                  buyDecisionV3.rejectedConfidenceMax,
+                  historicalDecision.confidence,
+                );
+
+              buyDecisionV3.rejectedConfidenceTotal +=
+                historicalDecision.confidence;
+            }
+          }
 
           if (historicalAnalysis.finalSignal === 'BUY') {
             buyDiagnostic.finalSignalBuy += 1;
@@ -1555,6 +1725,141 @@ export default function AnalysisScreen({
             decisionSell: buyDiagnostic.decisionSell,
             ordersBlocked: buyDiagnostic.ordersBlocked,
             riskBlocked: buyDiagnostic.riskBlocked,
+          },
+        );
+
+        const rejectedBuyDivisor =
+          buyDecisionV3.rejectedBuy > 0
+            ? buyDecisionV3.rejectedBuy
+            : 1;
+
+        const buyDecisionV3Summary = {
+          sinaisBuy: buyDecisionV3.buySignals,
+          aprovadosBuy: buyDecisionV3.approvedBuy,
+          rejeitadosBuy: buyDecisionV3.rejectedBuy,
+          taxaAprovacaoPct:
+            buyDecisionV3.buySignals > 0
+              ? (buyDecisionV3.approvedBuy /
+                  buyDecisionV3.buySignals) *
+                100
+              : 0,
+
+          tendenciaAlta: buyDecisionV3.trendAlta,
+          tendenciaLateral:
+            buyDecisionV3.trendLateral,
+          tendenciaBaixa: buyDecisionV3.trendBaixa,
+
+          scoreAbaixo65:
+            buyDecisionV3.scoreBelow65,
+          scorePeloMenos65:
+            buyDecisionV3.scoreAtLeast65,
+          confidenceAbaixo65:
+            buyDecisionV3.confidenceBelow65,
+          confidencePeloMenos65:
+            buyDecisionV3.confidenceAtLeast65,
+
+          score60a64: buyDecisionV3.score60To64,
+          score55a59: buyDecisionV3.score55To59,
+          scoreAbaixo55:
+            buyDecisionV3.scoreBelow55,
+
+          confidence60a64:
+            buyDecisionV3.confidence60To64,
+          confidence55a59:
+            buyDecisionV3.confidence55To59,
+          confidenceAbaixo55:
+            buyDecisionV3.confidenceBelow55,
+
+          todosCriteriosOk:
+            buyDecisionV3
+              .trendOkScoreOkConfidenceOk,
+          falhouSoTendencia:
+            buyDecisionV3.trendFailOnly,
+          falhouSoScore:
+            buyDecisionV3.scoreFailOnly,
+          falhouSoConfidence:
+            buyDecisionV3.confidenceFailOnly,
+          falhouMultiplos:
+            buyDecisionV3.multipleFails,
+
+          rejeitadosScoreMin:
+            Number.isFinite(
+              buyDecisionV3.rejectedScoreMin,
+            )
+              ? buyDecisionV3.rejectedScoreMin
+              : 0,
+          rejeitadosScoreMedio:
+            buyDecisionV3.rejectedScoreTotal /
+            rejectedBuyDivisor,
+          rejeitadosScoreMax:
+            Number.isFinite(
+              buyDecisionV3.rejectedScoreMax,
+            )
+              ? buyDecisionV3.rejectedScoreMax
+              : 0,
+
+          rejeitadosConfidenceMin:
+            Number.isFinite(
+              buyDecisionV3.rejectedConfidenceMin,
+            )
+              ? buyDecisionV3.rejectedConfidenceMin
+              : 0,
+          rejeitadosConfidenceMedia:
+            buyDecisionV3
+              .rejectedConfidenceTotal /
+            rejectedBuyDivisor,
+          rejeitadosConfidenceMax:
+            Number.isFinite(
+              buyDecisionV3.rejectedConfidenceMax,
+            )
+              ? buyDecisionV3.rejectedConfidenceMax
+              : 0,
+        };
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — DECISION ENGINE V3 — RESUMO',
+          buyDecisionV3Summary,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — DECISION ENGINE V3 — MOTIVOS DE REJEIÇÃO',
+          buyDecisionV3.reasons,
+        );
+
+        console.table(
+          Object.fromEntries(
+            Object.entries(
+              buyDecisionV3.reasons,
+            )
+              .sort(([, a], [, b]) => b - a)
+              .map(([reason, count]) => [
+                reason,
+                {
+                  count,
+                  pct:
+                    buyDecisionV3.rejectedBuy > 0
+                      ? (count /
+                          buyDecisionV3.rejectedBuy) *
+                        100
+                      : 0,
+                },
+              ]),
+          ),
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — DECISION ENGINE V3 — NEAR THRESHOLD',
+          {
+            score60a64:
+              buyDecisionV3.score60To64,
+            score55a59:
+              buyDecisionV3.score55To59,
+            confidence60a64:
+              buyDecisionV3.confidence60To64,
+            confidence55a59:
+              buyDecisionV3.confidence55To59,
+            observacao:
+              'Somente diagnóstico. Thresholds permanecem congelados em score >= 65, confidence >= 65 e tendência ALTA.',
           },
         );
 
