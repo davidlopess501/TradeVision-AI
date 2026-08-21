@@ -23,7 +23,6 @@ import {
 
 import {
   DEFAULT_RISK_RULES,
-  getRiskRulesForAsset,
   evaluateOrderRisk,
 } from '@/services/riskManager';
 
@@ -1115,24 +1114,6 @@ export default function AnalysisScreen({
           buyRiskApproved: 0,
           sellRiskApproved: 0,
 
-          buyStopCount: 0,
-          buyStopMin: Number.POSITIVE_INFINITY,
-          buyStopMax: Number.NEGATIVE_INFINITY,
-          buyStopTotal: 0,
-          buyRiskOneContractMin: Number.POSITIVE_INFINITY,
-          buyRiskOneContractMax: Number.NEGATIVE_INFINITY,
-          buyRiskOneContractTotal: 0,
-
-          sellStopCount: 0,
-          sellStopMin: Number.POSITIVE_INFINITY,
-          sellStopMax: Number.NEGATIVE_INFINITY,
-          sellStopTotal: 0,
-          sellRiskOneContractMin: Number.POSITIVE_INFINITY,
-          sellRiskOneContractMax: Number.NEGATIVE_INFINITY,
-          sellRiskOneContractTotal: 0,
-
-          riskBlockReasons: {} as Record<string, number>,
-
           scoreMin: Number.POSITIVE_INFINITY,
           scoreMax: Number.NEGATIVE_INFINITY,
           scoreTotal: 0,
@@ -1246,107 +1227,18 @@ export default function AnalysisScreen({
           const diagnosticRisk =
             evaluateOrderRisk(
               diagnosticOrder,
-              getRiskRulesForAsset('WDO'),
+              DEFAULT_RISK_RULES,
               {
                 dailyPnl: 0,
                 openPositions: 0,
               },
             );
 
-          const stopPoints =
-            Math.abs(
-              diagnosticOrder.entry -
-              diagnosticOrder.stop,
-            );
-
-          /*
-           * No WDO:
-           * tick = 0.5 e tickValue = R$ 5,00.
-           * Logo, 1 ponto = R$ 10,00 por contrato.
-           *
-           * Usamos o estimatedRiskAmount do Risk Manager quando ele
-           * representa 1 contrato bloqueado; para manter o diagnóstico
-           * independente da quantidade aprovada, calculamos também
-           * diretamente o risco de 1 contrato.
-           */
-          const riskOneContract =
-            stopPoints * 10;
-
-          if (diagnosticOrder.side === 'BUY') {
-            wdoDiagnostic.buyStopCount += 1;
-            wdoDiagnostic.buyStopMin =
-              Math.min(
-                wdoDiagnostic.buyStopMin,
-                stopPoints,
-              );
-            wdoDiagnostic.buyStopMax =
-              Math.max(
-                wdoDiagnostic.buyStopMax,
-                stopPoints,
-              );
-            wdoDiagnostic.buyStopTotal +=
-              stopPoints;
-
-            wdoDiagnostic.buyRiskOneContractMin =
-              Math.min(
-                wdoDiagnostic.buyRiskOneContractMin,
-                riskOneContract,
-              );
-            wdoDiagnostic.buyRiskOneContractMax =
-              Math.max(
-                wdoDiagnostic.buyRiskOneContractMax,
-                riskOneContract,
-              );
-            wdoDiagnostic.buyRiskOneContractTotal +=
-              riskOneContract;
-          } else {
-            wdoDiagnostic.sellStopCount += 1;
-            wdoDiagnostic.sellStopMin =
-              Math.min(
-                wdoDiagnostic.sellStopMin,
-                stopPoints,
-              );
-            wdoDiagnostic.sellStopMax =
-              Math.max(
-                wdoDiagnostic.sellStopMax,
-                stopPoints,
-              );
-            wdoDiagnostic.sellStopTotal +=
-              stopPoints;
-
-            wdoDiagnostic.sellRiskOneContractMin =
-              Math.min(
-                wdoDiagnostic.sellRiskOneContractMin,
-                riskOneContract,
-              );
-            wdoDiagnostic.sellRiskOneContractMax =
-              Math.max(
-                wdoDiagnostic.sellRiskOneContractMax,
-                riskOneContract,
-              );
-            wdoDiagnostic.sellRiskOneContractTotal +=
-              riskOneContract;
-          }
-
           if (
             diagnosticRisk.decision !== 'APPROVED' ||
             diagnosticRisk.quantity < 1
           ) {
             wdoDiagnostic.riskBlocked += 1;
-
-            const blockReason =
-              diagnosticRisk.reason ||
-              'Motivo não informado';
-
-            wdoDiagnostic.riskBlockReasons[
-              blockReason
-            ] =
-              (
-                wdoDiagnostic.riskBlockReasons[
-                  blockReason
-                ] ?? 0
-              ) + 1;
-
             continue;
           }
 
@@ -1429,86 +1321,6 @@ export default function AnalysisScreen({
             )
               ? wdoDiagnostic.confidenceMax
               : 0,
-        };
-
-        const wdoStopRiskSummary = {
-          BUY: {
-            ordersReady:
-              wdoDiagnostic.buyStopCount,
-            minStopPoints:
-              Number.isFinite(
-                wdoDiagnostic.buyStopMin,
-              )
-                ? wdoDiagnostic.buyStopMin
-                : 0,
-            avgStopPoints:
-              wdoDiagnostic.buyStopCount > 0
-                ? wdoDiagnostic.buyStopTotal /
-                  wdoDiagnostic.buyStopCount
-                : 0,
-            maxStopPoints:
-              Number.isFinite(
-                wdoDiagnostic.buyStopMax,
-              )
-                ? wdoDiagnostic.buyStopMax
-                : 0,
-            minRisk1Contract:
-              Number.isFinite(
-                wdoDiagnostic.buyRiskOneContractMin,
-              )
-                ? wdoDiagnostic.buyRiskOneContractMin
-                : 0,
-            avgRisk1Contract:
-              wdoDiagnostic.buyStopCount > 0
-                ? wdoDiagnostic.buyRiskOneContractTotal /
-                  wdoDiagnostic.buyStopCount
-                : 0,
-            maxRisk1Contract:
-              Number.isFinite(
-                wdoDiagnostic.buyRiskOneContractMax,
-              )
-                ? wdoDiagnostic.buyRiskOneContractMax
-                : 0,
-          },
-
-          SELL: {
-            ordersReady:
-              wdoDiagnostic.sellStopCount,
-            minStopPoints:
-              Number.isFinite(
-                wdoDiagnostic.sellStopMin,
-              )
-                ? wdoDiagnostic.sellStopMin
-                : 0,
-            avgStopPoints:
-              wdoDiagnostic.sellStopCount > 0
-                ? wdoDiagnostic.sellStopTotal /
-                  wdoDiagnostic.sellStopCount
-                : 0,
-            maxStopPoints:
-              Number.isFinite(
-                wdoDiagnostic.sellStopMax,
-              )
-                ? wdoDiagnostic.sellStopMax
-                : 0,
-            minRisk1Contract:
-              Number.isFinite(
-                wdoDiagnostic.sellRiskOneContractMin,
-              )
-                ? wdoDiagnostic.sellRiskOneContractMin
-                : 0,
-            avgRisk1Contract:
-              wdoDiagnostic.sellStopCount > 0
-                ? wdoDiagnostic.sellRiskOneContractTotal /
-                  wdoDiagnostic.sellStopCount
-                : 0,
-            maxRisk1Contract:
-              Number.isFinite(
-                wdoDiagnostic.sellRiskOneContractMax,
-              )
-                ? wdoDiagnostic.sellRiskOneContractMax
-                : 0,
-          },
         };
 
         const [buyFull, sellFull] =
@@ -1609,13 +1421,7 @@ export default function AnalysisScreen({
           };
         };
 
-        /*
-         * Não limpar o console aqui.
-         *
-         * O backtestV2Runner imprime o WDO LAB V2 durante as execuções.
-         * Se console.clear() for chamado neste ponto, os rankings
-         * BUY/SELL desaparecem antes de podermos analisá-los.
-         */
+        console.clear();
         console.group(
           '[TradeVision] WDO 15M REAL — LAB V1 BUY × SELL',
         );
@@ -1708,35 +1514,6 @@ export default function AnalysisScreen({
           },
         });
 
-        console.log(
-          '[TradeVision] WDO15 STOP/RISCO — DIAGNÓSTICO',
-        );
-
-        console.table({
-          'WDO15 BUY — STOP/RISCO':
-            wdoStopRiskSummary.BUY,
-          'WDO15 SELL — STOP/RISCO':
-            wdoStopRiskSummary.SELL,
-        });
-
-        console.log(
-          '[TradeVision] WDO15 RISK BLOCK REASONS',
-          wdoDiagnostic.riskBlockReasons,
-        );
-
-        console.table(
-          Object.fromEntries(
-            Object.entries(
-              wdoDiagnostic.riskBlockReasons,
-            ).map(
-              ([reason, count]) => [
-                reason,
-                { count },
-              ],
-            ),
-          ),
-        );
-
         console.table({
           'WDO15 BUY_ONLY — MODERADO':
             row(buyFull),
@@ -1767,6 +1544,78 @@ export default function AnalysisScreen({
               ],
             ]),
           ),
+        );
+
+        const buySummary = summarize(buyWindows);
+        const sellSummary = summarize(sellWindows);
+
+        const buyApproved =
+          buyFull.netProfit > 0 &&
+          buyFull.profitFactor > 1 &&
+          buySummary.positiveRate >= 50 &&
+          buySummary.totalTrades >= 8;
+
+        const sellApproved =
+          sellFull.netProfit > 0 &&
+          sellFull.profitFactor > 1 &&
+          sellSummary.positiveRate >= 50 &&
+          sellSummary.totalTrades >= 8;
+
+        const finalDecision =
+          buyApproved && sellApproved
+            ? 'BUY E SELL APROVADOS PARA A PRÓXIMA ETAPA'
+            : buyApproved
+              ? 'APENAS BUY APROVADO PARA A PRÓXIMA ETAPA'
+              : sellApproved
+                ? 'APENAS SELL APROVADO PARA A PRÓXIMA ETAPA'
+                : 'NENHUM CANDIDATO APROVADO — MANTER COMO HIPÓTESE';
+
+        console.log(
+          '[TradeVision] ========================================',
+        );
+        console.log(
+          '[TradeVision] WDO ROBUSTEZ V3 — RESUMO FINAL',
+        );
+        console.log('[TradeVision] BUY:', {
+          trades: buyFull.totalTrades,
+          winRate: buyFull.winRate,
+          netProfit: buyFull.netProfit,
+          profitFactor: buyFull.profitFactor,
+          maxDrawdown: buyFull.maxDrawdown,
+          walkForwardWindows: buySummary.windows,
+          walkForwardPositiveWindows:
+            buySummary.positiveWindows,
+          walkForwardPositiveRate:
+            buySummary.positiveRate,
+          walkForwardTotalTrades:
+            buySummary.totalTrades,
+          aprovado: buyApproved,
+        });
+        console.log('[TradeVision] SELL:', {
+          trades: sellFull.totalTrades,
+          winRate: sellFull.winRate,
+          netProfit: sellFull.netProfit,
+          profitFactor: sellFull.profitFactor,
+          maxDrawdown: sellFull.maxDrawdown,
+          walkForwardWindows: sellSummary.windows,
+          walkForwardPositiveWindows:
+            sellSummary.positiveWindows,
+          walkForwardPositiveRate:
+            sellSummary.positiveRate,
+          walkForwardTotalTrades:
+            sellSummary.totalTrades,
+          aprovado: sellApproved,
+        });
+        console.log(
+          '[TradeVision] WDO ROBUSTEZ V3 — DECISÃO:',
+          finalDecision,
+        );
+        console.log(
+          '[TradeVision] WDO ROBUSTEZ V3 — FIM',
+          'Validação somente. Nenhuma regra foi aplicada à estratégia.',
+        );
+        console.log(
+          '[TradeVision] ========================================',
         );
 
         console.log(
