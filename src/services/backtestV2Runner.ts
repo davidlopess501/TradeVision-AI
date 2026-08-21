@@ -67,6 +67,13 @@ export interface BacktestV2Config {
    * Quando ausente, o comportamento original é preservado.
    */
   frozenBuyFilter?: 'RSI_STRENGTH_54_M10_05';
+
+  /**
+   * LAB / validação somente.
+   * Permite testar um threshold BUY alternativo sem alterar o Decision Engine global.
+   * Quando ausente, o comportamento original (score >= 65) é preservado.
+   */
+  buyScoreThreshold?: number;
 }
 
 interface BacktestDiagnostics {
@@ -760,10 +767,32 @@ export async function runBacktestV2(
         historicalCandles,
       );
 
-    const decision =
+    let decision =
       evaluateAnalysis(
         analysis,
       );
+
+    /*
+     * WDO 5M V4 — override experimental local.
+     *
+     * Não altera o Decision Engine global. Só permite que o backtest
+     * compare score >= 65 (base) contra outro threshold BUY congelado.
+     * Tendência ALTA e confidence >= 65 continuam obrigatórios.
+     */
+    if (
+      typeof config.buyScoreThreshold === 'number' &&
+      analysis.finalSignal === 'BUY' &&
+      analysis.trend === 'ALTA' &&
+      analysis.score >= config.buyScoreThreshold &&
+      decision.confidence >= 65
+    ) {
+      decision = {
+        action: 'BUY',
+        confidence: decision.confidence,
+        reason:
+          `LAB V4: BUY validado com score >= ${config.buyScoreThreshold}, tendência ALTA e confiança >= 65.`,
+      };
+    }
 
     diagnostics.minScore =
       Math.min(

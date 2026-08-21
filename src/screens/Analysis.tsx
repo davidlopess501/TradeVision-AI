@@ -1450,25 +1450,37 @@ export default function AnalysisScreen({
             : 0,
         };
 
-        const [buyFull, sellFull] =
-          await Promise.all([
-            runBacktestV2({
-              asset: 'WDO',
-              timeframe: '5m',
-              initialCapital: 10000,
-              candles: testCandles,
-              strategyMode: 'BUY_ONLY',
-              executionCosts: moderateCosts,
-            }),
-            runBacktestV2({
-              asset: 'WDO',
-              timeframe: '5m',
-              initialCapital: 10000,
-              candles: testCandles,
-              strategyMode: 'SELL_ONLY',
-              executionCosts: moderateCosts,
-            }),
-          ]);
+        const [
+          buyFull,
+          buyScore60Full,
+          sellFull,
+        ] = await Promise.all([
+          runBacktestV2({
+            asset: 'WDO',
+            timeframe: '5m',
+            initialCapital: 10000,
+            candles: testCandles,
+            strategyMode: 'BUY_ONLY',
+            executionCosts: moderateCosts,
+          }),
+          runBacktestV2({
+            asset: 'WDO',
+            timeframe: '5m',
+            initialCapital: 10000,
+            candles: testCandles,
+            strategyMode: 'BUY_ONLY',
+            executionCosts: moderateCosts,
+            buyScoreThreshold: 60,
+          }),
+          runBacktestV2({
+            asset: 'WDO',
+            timeframe: '5m',
+            initialCapital: 10000,
+            candles: testCandles,
+            strategyMode: 'SELL_ONLY',
+            executionCosts: moderateCosts,
+          }),
+        ]);
 
         const row = (
           result: BacktestResult,
@@ -1481,30 +1493,44 @@ export default function AnalysisScreen({
         });
 
         const buyWindows: BacktestResult[] = [];
+        const buyScore60Windows: BacktestResult[] = [];
         const sellWindows: BacktestResult[] = [];
 
         for (const windowCandles of windows) {
-          const [buy, sell] =
-            await Promise.all([
-              runBacktestV2({
-                asset: 'WDO',
-                timeframe: '5m',
-                initialCapital: 10000,
-                candles: windowCandles,
-                strategyMode: 'BUY_ONLY',
-                executionCosts: moderateCosts,
-              }),
-              runBacktestV2({
-                asset: 'WDO',
-                timeframe: '5m',
-                initialCapital: 10000,
-                candles: windowCandles,
-                strategyMode: 'SELL_ONLY',
-                executionCosts: moderateCosts,
-              }),
-            ]);
+          const [
+            buy,
+            buyScore60,
+            sell,
+          ] = await Promise.all([
+            runBacktestV2({
+              asset: 'WDO',
+              timeframe: '5m',
+              initialCapital: 10000,
+              candles: windowCandles,
+              strategyMode: 'BUY_ONLY',
+              executionCosts: moderateCosts,
+            }),
+            runBacktestV2({
+              asset: 'WDO',
+              timeframe: '5m',
+              initialCapital: 10000,
+              candles: windowCandles,
+              strategyMode: 'BUY_ONLY',
+              executionCosts: moderateCosts,
+              buyScoreThreshold: 60,
+            }),
+            runBacktestV2({
+              asset: 'WDO',
+              timeframe: '5m',
+              initialCapital: 10000,
+              candles: windowCandles,
+              strategyMode: 'SELL_ONLY',
+              executionCosts: moderateCosts,
+            }),
+          ]);
 
           buyWindows.push(buy);
+          buyScore60Windows.push(buyScore60);
           sellWindows.push(sell);
         }
 
@@ -1557,6 +1583,8 @@ export default function AnalysisScreen({
 
         const buyWalkForward =
           summarize(buyWindows);
+        const buyScore60WalkForward =
+          summarize(buyScore60Windows);
         const sellWalkForward =
           summarize(sellWindows);
 
@@ -1621,6 +1649,12 @@ export default function AnalysisScreen({
           evaluateBase(
             buyFull,
             buyWalkForward,
+          );
+
+        const buyScore60Verdict =
+          evaluateBase(
+            buyScore60Full,
+            buyScore60WalkForward,
           );
 
         buyFunnelSummary.backtestBuyTrades =
@@ -1866,6 +1900,104 @@ export default function AnalysisScreen({
         console.log(
           '[TradeVision] WDO 5M BUY_ONLY LAB V2 — LEITURA',
           'Diagnóstico somente: não reduzimos thresholds e não alteramos stop/target. O objetivo é localizar o gargalo antes de criar qualquer hipótese nova.',
+        );
+
+        const v4NetDelta =
+          buyScore60Full.netProfit -
+          buyFull.netProfit;
+
+        const v4PfDelta =
+          buyScore60Full.profitFactor -
+          buyFull.profitFactor;
+
+        const v4TradeDelta =
+          buyScore60Full.totalTrades -
+          buyFull.totalTrades;
+
+        const v4Decision =
+          buyScore60Full.totalTrades >= 20 &&
+          buyScore60Full.netProfit > 0 &&
+          buyScore60Full.profitFactor >= 1.05 &&
+          buyScore60WalkForward.positiveRate >= 50
+            ? 'SCORE 60 PROMISSOR — AVANÇAR PARA ROBUSTEZ V5'
+            : 'SCORE 60 NÃO APROVADO — MANTER SCORE 65 COMO BASE';
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — SCORE 65 VS 60 — V4',
+        );
+
+        console.table({
+          'BASE SCORE >= 65': {
+            trades: buyFull.totalTrades,
+            winRate: buyFull.winRate,
+            netProfit: buyFull.netProfit,
+            profitFactor: buyFull.profitFactor,
+            maxDrawdown: buyFull.maxDrawdown,
+            walkForwardWindows:
+              buyWalkForward.windows,
+            positiveWindows:
+              buyWalkForward.positiveWindows,
+            positiveRate:
+              buyWalkForward.positiveRate,
+            walkForwardTrades:
+              buyWalkForward.totalTrades,
+          },
+          'CANDIDATO SCORE >= 60': {
+            trades: buyScore60Full.totalTrades,
+            winRate: buyScore60Full.winRate,
+            netProfit: buyScore60Full.netProfit,
+            profitFactor:
+              buyScore60Full.profitFactor,
+            maxDrawdown:
+              buyScore60Full.maxDrawdown,
+            walkForwardWindows:
+              buyScore60WalkForward.windows,
+            positiveWindows:
+              buyScore60WalkForward
+                .positiveWindows,
+            positiveRate:
+              buyScore60WalkForward
+                .positiveRate,
+            walkForwardTrades:
+              buyScore60WalkForward.totalTrades,
+          },
+        });
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — V4 — DELTAS',
+          {
+            tradeDelta: v4TradeDelta,
+            netProfitDelta: v4NetDelta,
+            profitFactorDelta: v4PfDelta,
+            baseTrades: buyFull.totalTrades,
+            candidateTrades:
+              buyScore60Full.totalTrades,
+            basePositiveRate:
+              buyWalkForward.positiveRate,
+            candidatePositiveRate:
+              buyScore60WalkForward
+                .positiveRate,
+          },
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — V4 — BASE 65 — VEREDITO',
+          buyVerdict,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — V4 — CANDIDATO 60 — VEREDITO',
+          buyScore60Verdict,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — V4 — DECISÃO:',
+          v4Decision,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — V4 — OBSERVAÇÃO',
+          'Validação somente. O threshold global do Decision Engine continua em 65.',
         );
 
         console.log(
