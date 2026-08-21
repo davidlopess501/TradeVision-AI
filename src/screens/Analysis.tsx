@@ -2288,6 +2288,352 @@ export default function AnalysisScreen({
           'Validação somente. O threshold global do Decision Engine continua em 65.',
         );
 
+
+        /*
+         * WDO 5M BUY — TESTE FINAL CONSOLIDADO
+         *
+         * Objetivo: encerrar a fase de laboratório com uma única decisão.
+         * Nenhuma regra global é alterada aqui.
+         *
+         * Candidato congelado: BUY, tendência ALTA, confidence >= 65,
+         * score >= 60.
+         */
+
+        const finalCostSteps = [
+          { label: 'BASE', extraSlip: 0, extraFixed: 0 },
+          { label: '+0.5', extraSlip: 0, extraFixed: 0.5 },
+          { label: '+1.0', extraSlip: 1, extraFixed: 1 },
+          { label: '+1.5', extraSlip: 1, extraFixed: 1.5 },
+          { label: '+2.0', extraSlip: 2, extraFixed: 2 },
+          { label: '+2.5', extraSlip: 2, extraFixed: 2.5 },
+          { label: '+3.0', extraSlip: 3, extraFixed: 3 },
+        ] as const;
+
+        const finalCostRows: Record<
+          string,
+          {
+            trades: number;
+            winRate: number;
+            netProfit: number;
+            profitFactor: number;
+            maxDrawdown: number;
+            expectancyPerTrade: number;
+            profitable: boolean;
+          }
+        > = {};
+
+        for (const step of finalCostSteps) {
+          const result =
+            await runBacktestV2({
+              asset: 'WDO',
+              timeframe: '5m',
+              initialCapital: 10000,
+              candles: testCandles,
+              strategyMode: 'BUY_ONLY',
+              executionCosts: {
+                slippageTicksPerSide:
+                  (moderateCosts.slippageTicksPerSide ?? 0) +
+                  step.extraSlip,
+                fixedCostPerContractRoundTrip:
+                  (moderateCosts
+                    .fixedCostPerContractRoundTrip ?? 0) +
+                  step.extraFixed,
+              },
+              buyScoreThreshold: 60,
+            });
+
+          finalCostRows[step.label] = {
+            trades: result.totalTrades,
+            winRate: result.winRate,
+            netProfit: result.netProfit,
+            profitFactor: result.profitFactor,
+            maxDrawdown: result.maxDrawdown,
+            expectancyPerTrade:
+              result.totalTrades > 0
+                ? result.netProfit /
+                  result.totalTrades
+                : 0,
+            profitable: result.netProfit > 0,
+          };
+        }
+
+        /*
+         * Walk-forward final em 6 blocos cronológicos próximos de tamanho igual.
+         * Não recalibra nenhum parâmetro entre os blocos.
+         */
+        const finalFoldCount = 6;
+        const finalFoldSize = Math.floor(
+          testCandles.length / finalFoldCount,
+        );
+
+        const finalFoldRows: Record<
+          string,
+          {
+            candles: number;
+            trades65: number;
+            net65: number;
+            pf65: number;
+            trades60: number;
+            net60: number;
+            pf60: number;
+            deltaNet: number;
+            score60Positive: boolean;
+          }
+        > = {};
+
+        let finalPositive60 = 0;
+        let finalTotalTrades60 = 0;
+        let finalTotalNet60 = 0;
+
+        for (
+          let fold = 0;
+          fold < finalFoldCount;
+          fold += 1
+        ) {
+          const start = fold * finalFoldSize;
+          const end =
+            fold === finalFoldCount - 1
+              ? testCandles.length
+              : (fold + 1) * finalFoldSize;
+
+          const foldCandles =
+            testCandles.slice(start, end);
+
+          const [base65, candidate60] =
+            await Promise.all([
+              runBacktestV2({
+                asset: 'WDO',
+                timeframe: '5m',
+                initialCapital: 10000,
+                candles: foldCandles,
+                strategyMode: 'BUY_ONLY',
+                executionCosts: moderateCosts,
+              }),
+              runBacktestV2({
+                asset: 'WDO',
+                timeframe: '5m',
+                initialCapital: 10000,
+                candles: foldCandles,
+                strategyMode: 'BUY_ONLY',
+                executionCosts: moderateCosts,
+                buyScoreThreshold: 60,
+              }),
+            ]);
+
+          if (candidate60.netProfit > 0) {
+            finalPositive60 += 1;
+          }
+
+          finalTotalTrades60 +=
+            candidate60.totalTrades;
+          finalTotalNet60 +=
+            candidate60.netProfit;
+
+          finalFoldRows[`F${fold + 1}`] = {
+            candles: foldCandles.length,
+            trades65: base65.totalTrades,
+            net65: base65.netProfit,
+            pf65: base65.profitFactor,
+            trades60:
+              candidate60.totalTrades,
+            net60:
+              candidate60.netProfit,
+            pf60:
+              candidate60.profitFactor,
+            deltaNet:
+              candidate60.netProfit -
+              base65.netProfit,
+            score60Positive:
+              candidate60.netProfit > 0,
+          };
+        }
+
+        const finalPositiveRate60 =
+          (finalPositive60 / finalFoldCount) *
+          100;
+
+        const finalBaseCost =
+          finalCostRows.BASE;
+
+        const finalStress1 =
+          finalCostRows['+1.0'];
+
+        const finalStress2 =
+          finalCostRows['+2.0'];
+
+        const finalStress3 =
+          finalCostRows['+3.0'];
+
+        const finalHasEnoughTrades =
+          buyScore60Full.totalTrades >= 50;
+
+        const finalPfHealthy =
+          buyScore60Full.profitFactor >= 1.20;
+
+        const finalBaseProfitable =
+          buyScore60Full.netProfit > 0;
+
+        const finalTemporalConsistency =
+          finalPositiveRate60 >= 60;
+
+        const finalCostMarginGood =
+          finalStress1.netProfit > 0 &&
+          finalStress1.profitFactor > 1;
+
+        const finalExtremeCostNotCatastrophic =
+          finalStress2.netProfit >
+          -(Math.abs(buyScore60Full.netProfit) *
+            0.15);
+
+        const finalApprove =
+          finalHasEnoughTrades &&
+          finalPfHealthy &&
+          finalBaseProfitable &&
+          finalTemporalConsistency &&
+          finalCostMarginGood &&
+          finalExtremeCostNotCatastrophic;
+
+        const finalObserve =
+          !finalApprove &&
+          finalHasEnoughTrades &&
+          finalBaseProfitable &&
+          buyScore60Full.profitFactor > 1 &&
+          finalPositiveRate60 >= 50;
+
+        const finalConsolidatedDecision =
+          finalApprove
+            ? '🟢 APROVAR WDO 5M BUY SCORE 60 PARA PAPER TRADING / SIMULAÇÃO'
+            : finalObserve
+              ? '🟡 MANTER EM OBSERVAÇÃO — NÃO PROMOVER AINDA'
+              : '🔴 REJEITAR CANDIDATO SCORE 60';
+
+        console.log(
+          '[TradeVision] ========================================',
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — TESTE FINAL CONSOLIDADO',
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — FINAL — 65 VS 60',
+        );
+
+        console.table({
+          'SCORE >= 65': {
+            trades: buyFull.totalTrades,
+            winRate: buyFull.winRate,
+            netProfit: buyFull.netProfit,
+            profitFactor: buyFull.profitFactor,
+            maxDrawdown: buyFull.maxDrawdown,
+            expectancyPerTrade:
+              buyFull.totalTrades > 0
+                ? buyFull.netProfit /
+                  buyFull.totalTrades
+                : 0,
+          },
+          'SCORE >= 60': {
+            trades:
+              buyScore60Full.totalTrades,
+            winRate:
+              buyScore60Full.winRate,
+            netProfit:
+              buyScore60Full.netProfit,
+            profitFactor:
+              buyScore60Full.profitFactor,
+            maxDrawdown:
+              buyScore60Full.maxDrawdown,
+            expectancyPerTrade:
+              buyScore60Full.totalTrades > 0
+                ? buyScore60Full.netProfit /
+                  buyScore60Full.totalTrades
+                : 0,
+          },
+        });
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — FINAL — WALK-FORWARD 6 BLOCOS',
+        );
+        console.table(finalFoldRows);
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — FINAL — SENSIBILIDADE DE CUSTOS',
+        );
+        console.table(finalCostRows);
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — FINAL — CHECKLIST',
+          {
+            candlesTestados:
+              testCandles.length,
+            candidate:
+              'BUY score >= 60',
+            fullTrades:
+              buyScore60Full.totalTrades,
+            fullNetProfit:
+              buyScore60Full.netProfit,
+            fullProfitFactor:
+              buyScore60Full.profitFactor,
+            fullWinRate:
+              buyScore60Full.winRate,
+            fullMaxDrawdown:
+              buyScore60Full.maxDrawdown,
+            expectancyPerTrade:
+              buyScore60Full.totalTrades > 0
+                ? buyScore60Full.netProfit /
+                  buyScore60Full.totalTrades
+                : 0,
+            positiveFolds:
+              finalPositive60,
+            totalFolds:
+              finalFoldCount,
+            positiveFoldRate:
+              finalPositiveRate60,
+            walkForwardTrades:
+              finalTotalTrades60,
+            walkForwardNet:
+              finalTotalNet60,
+            baseCostNet:
+              finalBaseCost.netProfit,
+            stress1Net:
+              finalStress1.netProfit,
+            stress2Net:
+              finalStress2.netProfit,
+            stress3Net:
+              finalStress3.netProfit,
+            hasEnoughTrades:
+              finalHasEnoughTrades,
+            pfHealthy:
+              finalPfHealthy,
+            baseProfitable:
+              finalBaseProfitable,
+            temporalConsistency:
+              finalTemporalConsistency,
+            costMarginGood:
+              finalCostMarginGood,
+            extremeCostNotCatastrophic:
+              finalExtremeCostNotCatastrophic,
+          },
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — FINAL — DECISÃO:',
+          finalConsolidatedDecision,
+        );
+
+        console.log(
+          '[TradeVision] WDO 5M BUY — FINAL — PRÓXIMO PASSO:',
+          finalApprove
+            ? 'Parar otimização. Manter score 60 congelado e iniciar paper trading / simulação fora da amostra.'
+            : finalObserve
+              ? 'Não alterar o Decision Engine global. Coletar mais dados/out-of-sample antes de decidir.'
+              : 'Encerrar hipótese score 60 e voltar ao laboratório de entradas.',
+        );
+
+        console.log(
+          '[TradeVision] ========================================',
+        );
+
         console.log(
           '[TradeVision] WDO 5M BASE V1 — CRITÉRIOS',
           {
