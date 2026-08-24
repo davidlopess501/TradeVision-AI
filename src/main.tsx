@@ -8,6 +8,18 @@ import {
   registerRealMarketDataProvider,
 } from '@/services/bootstrapMarketData';
 
+import {
+  testSupabaseConnection,
+} from './lib/testSupabase';
+
+/*
+ * Teste temporário da conexão com o Supabase.
+ *
+ * Neste momento ele apenas consulta os
+ * últimos candles da tabela wdo_5m.
+ */
+void testSupabaseConnection();
+
 /*
  * Tenta registrar o provedor real ao iniciar.
  *
