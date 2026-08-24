@@ -1,12 +1,38 @@
+import {
+  setRealMarketDataProvider,
+} from './types';
+
+import {
+  SupabaseMarketDataProvider,
+} from './supabaseMarketProvider';
+
 /**
- * O provedor real ainda não é registrado automaticamente.
+ * Registra o Supabase como provedor
+ * REAL de dados de mercado.
  *
- * A função segura da Finnhub já funciona em /api/quote,
- * mas ela será usada apenas para testar a conexão com AAPL.
- *
- * WIN e WDO continuam em modo Simulado/Demo até conectarmos
- * um provedor compatível com os contratos da B3.
+ * Registrar o provedor NÃO ativa
+ * automaticamente o modo REAL.
  */
-export function registerRealMarketDataProvider(): boolean {
-  return false;
+export function registerRealMarketDataProvider():
+  boolean {
+
+  try {
+    const provider =
+      new SupabaseMarketDataProvider();
+
+    setRealMarketDataProvider(provider);
+
+    console.info(
+      '[TradeVision] Supabase B3 registrado como provedor REAL.',
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      '[TradeVision] Falha ao registrar Supabase:',
+      error,
+    );
+
+    return false;
+  }
 }
