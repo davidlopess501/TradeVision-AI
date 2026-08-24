@@ -45,6 +45,17 @@ import {
  * ============================================================
  */
 
+type SupabaseCandleRow = {
+  candle_time: string;
+  asset: string;
+  open: number | string;
+  high: number | string;
+  low: number | string;
+  close: number | string;
+  volume: number | string;
+};
+
+
 export class SupabaseMarketDataProvider
   implements IMarketDataProvider
 {
@@ -144,63 +155,75 @@ export class SupabaseMarketDataProvider
 
 
     /**
+     * O cliente Supabase deste projeto ainda
+     * não possui os tipos gerados da tabela
+     * wdo_5m.
+     *
+     * Por isso tipamos explicitamente as
+     * linhas retornadas antes da conversão
+     * para Candle.
+     */
+    const rows =
+      data as unknown as SupabaseCandleRow[];
+
+
+    /**
      * Converte os registros do Supabase
      * para o formato Candle usado
      * internamente pelo TradeVision.
      */
-    const candles:
-      Candle[] =
-        data
-          .map((row) => ({
-            time:
-              new Date(
-                row.candle_time,
-              ).getTime(),
+    const candles: Candle[] =
+      rows
+        .map((row) => ({
+          time:
+            new Date(
+              row.candle_time,
+            ).getTime(),
 
-            open:
-              Number(row.open),
+          open:
+            Number(row.open),
 
-            high:
-              Number(row.high),
+          high:
+            Number(row.high),
 
-            low:
-              Number(row.low),
+          low:
+            Number(row.low),
 
-            close:
-              Number(row.close),
+          close:
+            Number(row.close),
 
-            volume:
-              Number(row.volume),
-          }))
-          .filter(
-            (candle) =>
-              Number.isFinite(
-                candle.time,
-              ) &&
-              Number.isFinite(
-                candle.open,
-              ) &&
-              Number.isFinite(
-                candle.high,
-              ) &&
-              Number.isFinite(
-                candle.low,
-              ) &&
-              Number.isFinite(
-                candle.close,
-              ) &&
-              Number.isFinite(
-                candle.volume,
-              ),
-          )
-          .sort(
-            (
-              first,
-              second,
-            ) =>
-              first.time -
-              second.time,
-          );
+          volume:
+            Number(row.volume),
+        }))
+        .filter(
+          (candle) =>
+            Number.isFinite(
+              candle.time,
+            ) &&
+            Number.isFinite(
+              candle.open,
+            ) &&
+            Number.isFinite(
+              candle.high,
+            ) &&
+            Number.isFinite(
+              candle.low,
+            ) &&
+            Number.isFinite(
+              candle.close,
+            ) &&
+            Number.isFinite(
+              candle.volume,
+            ),
+        )
+        .sort(
+          (
+            first,
+            second,
+          ) =>
+            first.time -
+            second.time,
+        );
 
 
     if (candles.length === 0) {
@@ -522,19 +545,9 @@ export class SupabaseMarketDataProvider
    * ANÁLISE REAL
    * ==========================================================
    *
-   * ESTA É A PARTE QUE ESTAVA FALTANDO.
-   *
-   * Antes:
-   *
-   * throw new Error(
-   *   'Análise REAL Supabase será conectada...'
-   * )
-   *
-   * Agora:
-   *
    * 1. Busca candles reais do Supabase.
-   * 2. Usa o mesmo motor histórico já
-   *    utilizado pelo TradeVision.
+   * 2. Usa o motor histórico já existente
+   *    no TradeVision.
    * 3. Retorna AnalysisResult normalmente.
    */
   async analyze(
@@ -555,9 +568,8 @@ export class SupabaseMarketDataProvider
 
 
     /**
-     * 120 candles é a janela que o
-     * sistema já utiliza em diversas
-     * análises do WDO.
+     * 120 candles é a janela utilizada
+     * para a análise real.
      */
     const candles =
       await this.getCandles(
@@ -570,11 +582,6 @@ export class SupabaseMarketDataProvider
     /**
      * A análise técnica precisa de
      * histórico suficiente.
-     *
-     * Hoje acabamos de iniciar a coleta
-     * pelo Supabase, então é importante
-     * deixar a mensagem explícita caso
-     * ainda não haja candles suficientes.
      */
     if (candles.length < 30) {
 
