@@ -31,18 +31,19 @@ import {
   buildHistoricalAnalysis,
 } from './historicalAnalysisBuilder';
 
+import {
+  WDO_REAL_HISTORY_24082026,
+} from '@/data/wdoRealHistory24082026';
+
 
 /**
- * ============================================================
  * TRADEVISION AI
- * PROVIDER REAL WDO 5M
  *
- * Excel / RTD
- *      ↓
- * Supabase
- *      ↓
- * TradeVision REAL
- * ============================================================
+ * WDO 5M REAL
+ *
+ * Histórico real capturado pelo Excel/RTD
+ * +
+ * candles recebidos continuamente pelo Supabase.
  */
 
 type SupabaseCandleRow = {
@@ -54,6 +55,68 @@ type SupabaseCandleRow = {
   close: number | string;
   volume: number | string;
 };
+
+
+function mergeRealCandles(
+  historicalCandles: Candle[],
+  supabaseCandles: Candle[],
+): Candle[] {
+
+  /**
+   * Map indexado pelo horário.
+   *
+   * Primeiro entra o histórico do Excel.
+   * Depois entra o Supabase.
+   *
+   * Assim, caso exista um candle duplicado,
+   * o registro do Supabase substitui o local.
+   */
+  const byTime =
+    new Map<number, Candle>();
+
+
+  for (
+    const candle of historicalCandles
+  ) {
+
+    if (
+      Number.isFinite(candle.time)
+    ) {
+      byTime.set(
+        candle.time,
+        candle,
+      );
+    }
+
+  }
+
+
+  for (
+    const candle of supabaseCandles
+  ) {
+
+    if (
+      Number.isFinite(candle.time)
+    ) {
+      byTime.set(
+        candle.time,
+        candle,
+      );
+    }
+
+  }
+
+
+  return Array
+    .from(
+      byTime.values(),
+    )
+    .sort(
+      (first, second) =>
+        first.time -
+        second.time,
+    );
+}
 
 
 export class SupabaseMarketDataProvider
@@ -74,13 +137,6 @@ export class SupabaseMarketDataProvider
     count: number,
   ): Promise<Candle[]> {
 
-    /**
-     * Nesta primeira versão REAL,
-     * trabalhamos somente com:
-     *
-     * WDO
-     * 5 minutos
-     */
     if (asset !== 'WDO') {
       throw new Error(
         `Modo REAL ainda não configurado para ${asset}. Selecione WDO.`,
@@ -90,18 +146,11 @@ export class SupabaseMarketDataProvider
 
     if (timeframe !== '5m') {
       throw new Error(
-        `Modo REAL do Supabase está disponível somente para WDO 5m. Timeframe recebido: ${timeframe}.`,
+        `Modo REAL disponível somente para WDO 5m. Timeframe recebido: ${timeframe}.`,
       );
     }
 
 
-    /**
-     * O Supabase será consultado no máximo
-     * por 2.000 candles por chamada.
-     *
-     * Isso evita consultas muito pesadas
-     * enquanto estamos na primeira versão.
-     */
     const safeCount =
       Math.min(
         2000,
@@ -144,118 +193,142 @@ export class SupabaseMarketDataProvider
     }
 
 
+    const rows =
+      (
+        data ?? []
+      ) as unknown as
+        SupabaseCandleRow[];
+
+
+    const supabaseCandles:
+      Candle[] =
+        rows
+          .map((row) => ({
+            time:
+              new Date(
+                row.candle_time,
+              ).getTime(),
+
+            open:
+              Number(
+                row.open,
+              ),
+
+            high:
+              Number(
+                row.high,
+              ),
+
+            low:
+              Number(
+                row.low,
+              ),
+
+            close:
+              Number(
+                row.close,
+              ),
+
+            volume:
+              Number(
+                row.volume,
+              ),
+          }))
+          .filter(
+            (candle) =>
+              Number.isFinite(
+                candle.time,
+              ) &&
+              Number.isFinite(
+                candle.open,
+              ) &&
+              Number.isFinite(
+                candle.high,
+              ) &&
+              Number.isFinite(
+                candle.low,
+              ) &&
+              Number.isFinite(
+                candle.close,
+              ) &&
+              Number.isFinite(
+                candle.volume,
+              ),
+          );
+
+
+    /**
+     * Histórico REAL anterior capturado
+     * pelo Excel/RTD em 24/08/2026.
+     *
+     * Não contém registros de 1 segundo.
+     */
+    const historicalCandles =
+      WDO_REAL_HISTORY_24082026;
+
+
+    const merged =
+      mergeRealCandles(
+        historicalCandles,
+        supabaseCandles,
+      );
+
+
     if (
-      !data ||
-      data.length === 0
+      merged.length === 0
     ) {
       throw new Error(
-        'Nenhum candle WDO 5m encontrado no Supabase.',
+        'Nenhum candle REAL WDO 5m disponível.',
       );
     }
 
 
     /**
-     * O cliente Supabase deste projeto ainda
-     * não possui os tipos gerados da tabela
-     * wdo_5m.
-     *
-     * Por isso tipamos explicitamente as
-     * linhas retornadas antes da conversão
-     * para Candle.
+     * Mantém exatamente a quantidade
+     * solicitada pelo consumidor.
      */
-    const rows =
-      data as unknown as SupabaseCandleRow[];
-
-
-    /**
-     * Converte os registros do Supabase
-     * para o formato Candle usado
-     * internamente pelo TradeVision.
-     */
-    const candles: Candle[] =
-      rows
-        .map((row) => ({
-          time:
-            new Date(
-              row.candle_time,
-            ).getTime(),
-
-          open:
-            Number(row.open),
-
-          high:
-            Number(row.high),
-
-          low:
-            Number(row.low),
-
-          close:
-            Number(row.close),
-
-          volume:
-            Number(row.volume),
-        }))
-        .filter(
-          (candle) =>
-            Number.isFinite(
-              candle.time,
-            ) &&
-            Number.isFinite(
-              candle.open,
-            ) &&
-            Number.isFinite(
-              candle.high,
-            ) &&
-            Number.isFinite(
-              candle.low,
-            ) &&
-            Number.isFinite(
-              candle.close,
-            ) &&
-            Number.isFinite(
-              candle.volume,
-            ),
-        )
-        .sort(
-          (
-            first,
-            second,
-          ) =>
-            first.time -
-            second.time,
-        );
-
-
-    if (candles.length === 0) {
-      throw new Error(
-        'Os registros do Supabase foram encontrados, mas nenhum candle válido pôde ser convertido.',
-      );
-    }
+    const result =
+      merged.length >
+      safeCount
+        ? merged.slice(
+            -safeCount,
+          )
+        : merged;
 
 
     console.info(
-      '[TradeVision REAL] Candles WDO 5m recebidos do Supabase:',
+      '[TradeVision REAL] WDO 5m',
       {
-        total:
-          candles.length,
+        historicoExcel:
+          historicalCandles.length,
 
-        primeiro:
-          candles[0]?.time,
+        supabase:
+          supabaseCandles.length,
 
-        ultimo:
-          candles[
-            candles.length - 1
+        totalSemDuplicatas:
+          merged.length,
+
+        retornados:
+          result.length,
+
+        primeiroHorario:
+          result[0]
+            ?.time,
+
+        ultimoHorario:
+          result[
+            result.length - 1
           ]?.time,
 
         ultimoClose:
-          candles[
-            candles.length - 1
+          result[
+            result.length - 1
           ]?.close,
       },
     );
 
 
-    return candles;
+    return result;
   }
 
 
@@ -263,9 +336,6 @@ export class SupabaseMarketDataProvider
    * ==========================================================
    * COTAÇÃO
    * ==========================================================
-   *
-   * Utilizamos o último candle fechado
-   * armazenado no Supabase.
    */
   async getQuote(
     asset: Asset,
@@ -274,7 +344,7 @@ export class SupabaseMarketDataProvider
     const candles =
       await this.getCandles(
         asset,
-        '5m' as Timeframe,
+        '5m',
         2,
       );
 
@@ -329,11 +399,6 @@ export class SupabaseMarketDataProvider
       open:
         latest.open,
 
-      /**
-       * Ainda não recebemos BID/ASK pelo
-       * Excel, portanto spread permanece
-       * neutro nesta etapa.
-       */
       spread: 0,
 
       updatedAt:
@@ -346,12 +411,6 @@ export class SupabaseMarketDataProvider
    * ==========================================================
    * ATUALIZAÇÃO DE COTAÇÃO
    * ==========================================================
-   *
-   * Consulta o Supabase a cada 5 segundos.
-   *
-   * Como o Excel envia candle fechado de
-   * 5 minutos, o preço só muda quando um
-   * novo candle entrar no banco.
    */
   subscribeQuotes(
     asset: Asset,
@@ -433,11 +492,6 @@ export class SupabaseMarketDataProvider
    * ==========================================================
    * INDICADORES REAIS
    * ==========================================================
-   *
-   * Utiliza os mesmos cálculos que já
-   * existem no TradeVision.
-   *
-   * Nenhum indicador é inventado.
    */
   async getIndicators(
     asset: Asset,
@@ -459,13 +513,15 @@ export class SupabaseMarketDataProvider
 
 
     /**
-     * Precisamos de histórico mínimo
-     * para indicadores como EMA e MACD.
+     * Trabalhamos com margem acima
+     * do mínimo anterior.
      */
-    if (candles.length < 30) {
+    if (
+      candles.length < 35
+    ) {
 
       throw new Error(
-        `Histórico REAL ainda insuficiente para calcular indicadores. Candles disponíveis: ${candles.length}.`,
+        `Histórico REAL insuficiente. Existem ${candles.length} candles; são necessários pelo menos 35.`,
       );
 
     }
@@ -504,13 +560,6 @@ export class SupabaseMarketDataProvider
       ];
 
 
-    /**
-     * Mantemos a mesma lista de
-     * indicadores esperada pelo sistema.
-     *
-     * Indicadores ainda não calculados
-     * ficam neutros.
-     */
     return INDICATOR_META.map(
       (meta) => {
 
@@ -522,11 +571,17 @@ export class SupabaseMarketDataProvider
           );
 
 
-        if (realIndicator) {
+        if (
+          realIndicator
+        ) {
           return realIndicator;
         }
 
 
+        /**
+         * Indicadores não implementados
+         * permanecem neutros.
+         */
         return buildIndicator(
           meta.key,
           () => 0.5,
@@ -544,11 +599,6 @@ export class SupabaseMarketDataProvider
    * ==========================================================
    * ANÁLISE REAL
    * ==========================================================
-   *
-   * 1. Busca candles reais do Supabase.
-   * 2. Usa o motor histórico já existente
-   *    no TradeVision.
-   * 3. Retorna AnalysisResult normalmente.
    */
   async analyze(
     asset: Asset,
@@ -567,10 +617,6 @@ export class SupabaseMarketDataProvider
     }
 
 
-    /**
-     * 120 candles é a janela utilizada
-     * para a análise real.
-     */
     const candles =
       await this.getCandles(
         asset,
@@ -580,13 +626,15 @@ export class SupabaseMarketDataProvider
 
 
     /**
-     * A análise técnica precisa de
-     * histórico suficiente.
+     * O motor interno mostrou que precisamos
+     * trabalhar com pelo menos 35 candles.
      */
-    if (candles.length < 30) {
+    if (
+      candles.length < 35
+    ) {
 
       throw new Error(
-        `Supabase conectado, mas ainda há apenas ${candles.length} candles reais. Precisamos acumular mais histórico para liberar a análise técnica completa.`,
+        `Histórico REAL insuficiente: ${candles.length}/35 candles.`,
       );
 
     }
@@ -601,7 +649,7 @@ export class SupabaseMarketDataProvider
 
 
     console.info(
-      '[TradeVision REAL] Análise WDO 5m concluída:',
+      '[TradeVision REAL] Análise WDO 5m concluída',
       {
         candles:
           candles.length,
