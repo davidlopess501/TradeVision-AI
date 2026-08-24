@@ -98,6 +98,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { AssetSelector } from '@/components/analysis/AssetSelector';
 import { TimeframeSelector } from '@/components/analysis/TimeframeSelector';
 import { MarketChart } from '@/components/analysis/MarketChart';
+import { AnalysisSummaryPanel } from '@/components/analysis/AnalysisSummaryPanel';
 import { IndicatorCards } from '@/components/analysis/IndicatorCards';
 import { SignalPanel } from '@/components/analysis/SignalPanel';
 import { SmartMoneyPanel } from '@/components/analysis/SmartMoneyPanel';
@@ -4290,6 +4291,12 @@ export default function AnalysisScreen({
               result={result}
             />
           </section>
+
+          <AnalysisSummaryPanel
+            asset={asset}
+            timeframe={timeframe}
+            result={result}
+          />
 
           <SmartMoneyPanel
             asset={asset}
