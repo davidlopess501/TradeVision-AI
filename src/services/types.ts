@@ -145,8 +145,10 @@ let currentMode: MarketDataMode =
 /**
  * Carrega o modo salvo no navegador.
  *
- * Em ambientes sem window, retorna
- * SIMULATED com segurança.
+ * Agora permite restaurar REAL.
+ * O modo REAL continua protegido por
+ * setMarketDataMode(), que exige um
+ * provedor real registrado.
  */
 function loadSavedMode(): MarketDataMode {
   if (
@@ -165,17 +167,6 @@ function loadSavedMode(): MarketDataMode {
     savedMode === 'DEMO' ||
     savedMode === 'REAL'
   ) {
-    /**
-     * Nunca inicia automaticamente
-     * em modo REAL.
-     *
-     * Isso evita conexão ou operação
-     * real acidental após recarregar.
-     */
-    if (savedMode === 'REAL') {
-      return 'DEMO';
-    }
-
     return savedMode;
   }
 
@@ -357,37 +348,4 @@ export function getMarketDataStatus():
     description:
       'Dados simulados para desenvolvimento e testes.',
   };
-}
-
-/**
- * Retorna um texto curto para a interface.
- */
-export function getMarketDataModeLabel():
-  string {
-  if (
-    currentMode === 'REAL'
-  ) {
-    return 'Dados reais';
-  }
-
-  if (
-    currentMode === 'DEMO'
-  ) {
-    return 'Modo demo';
-  }
-
-  return 'Dados simulados';
-}
-
-/**
- * Indica se o sistema pode enviar
- * ordens reais.
- *
- * Atualmente continuará falso até
- * adicionarmos uma integração específica
- * de execução e controles de segurança.
- */
-export function canSendRealOrders():
-  boolean {
-  return false;
 }
