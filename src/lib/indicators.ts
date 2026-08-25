@@ -500,12 +500,16 @@ export function finalizeAnalysis(
   const stop =
     finalSignal === 'BUY'
       ? quote.price - roundedStopDistance
-      : quote.price + roundedStopDistance;
+      : finalSignal === 'SELL'
+        ? quote.price + roundedStopDistance
+        : quote.price;
 
   const target =
     finalSignal === 'BUY'
       ? quote.price + roundedStopDistance * 2
-      : quote.price - roundedStopDistance * 2;
+      : finalSignal === 'SELL'
+        ? quote.price - roundedStopDistance * 2
+        : quote.price;
 
   const probability =
     finalSignal === 'WAIT'

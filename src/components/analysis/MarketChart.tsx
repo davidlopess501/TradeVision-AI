@@ -271,18 +271,47 @@ export function MarketChart({
     );
 
 
+  const hasValidBuyPlan =
+    result.finalSignal === 'BUY' &&
+    result.stop < result.entry &&
+    result.target > result.entry;
+
+
+  const hasValidSellPlan =
+    result.finalSignal === 'SELL' &&
+    result.stop > result.entry &&
+    result.target < result.entry;
+
+
+  const hasActiveTrade =
+    hasValidBuyPlan ||
+    hasValidSellPlan;
+
+
+  const hasInvalidDirectionalPlan =
+    (
+      result.finalSignal === 'BUY' ||
+      result.finalSignal === 'SELL'
+    ) &&
+    !hasActiveTrade;
+
+
   const riskPoints =
-    Math.abs(
-      result.entry -
-      result.stop,
-    );
+    hasActiveTrade
+      ? Math.abs(
+          result.entry -
+          result.stop,
+        )
+      : 0;
 
 
   const rewardPoints =
-    Math.abs(
-      result.target -
-      result.entry,
-    );
+    hasActiveTrade
+      ? Math.abs(
+          result.target -
+          result.entry,
+        )
+      : 0;
 
 
   const riskReward =
@@ -980,64 +1009,66 @@ export function MarketChart({
       }
 
 
-      candleSeries
-        .createPriceLine({
-          price:
-            result.entry,
+      if (hasActiveTrade) {
+        candleSeries
+          .createPriceLine({
+            price:
+              result.entry,
 
-          color:
-            '#38bdf8',
+            color:
+              '#38bdf8',
 
-          lineWidth: 2,
+            lineWidth: 2,
 
-          lineStyle: 2,
+            lineStyle: 2,
 
-          axisLabelVisible:
-            true,
+            axisLabelVisible:
+              true,
 
-          title:
-            'Entrada',
-        });
-
-
-      candleSeries
-        .createPriceLine({
-          price:
-            result.stop,
-
-          color:
-            '#ef4444',
-
-          lineWidth: 2,
-
-          lineStyle: 2,
-
-          axisLabelVisible:
-            true,
-
-          title:
-            'Stop',
-        });
+            title:
+              'Entrada',
+          });
 
 
-      candleSeries
-        .createPriceLine({
-          price:
-            result.target,
+        candleSeries
+          .createPriceLine({
+            price:
+              result.stop,
 
-          color:
-            '#10b981',
+            color:
+              '#ef4444',
 
-          lineWidth: 2,
+            lineWidth: 2,
 
-          lineStyle: 2,
+            lineStyle: 2,
 
-          axisLabelVisible:
-            true,
+            axisLabelVisible:
+              true,
 
-          title:
-            'Alvo',
-        });
+            title:
+              'Stop',
+          });
+
+
+        candleSeries
+          .createPriceLine({
+            price:
+              result.target,
+
+            color:
+              '#10b981',
+
+            lineWidth: 2,
+
+            lineStyle: 2,
+
+            axisLabelVisible:
+              true,
+
+            title:
+              'Alvo',
+          });
+      }
 
 
       /**
@@ -1116,6 +1147,8 @@ export function MarketChart({
       result.entry,
       result.stop,
       result.target,
+      result.finalSignal,
+      hasActiveTrade,
       layers,
       marketStructure,
       orderBlockAnalysis,
@@ -1323,69 +1356,93 @@ export function MarketChart({
       />
 
 
-      <div className="grid grid-cols-3 border-t border-white/[0.06] bg-ink-950/40 sm:grid-cols-6">
+      {hasActiveTrade ? (
+        <div className="grid grid-cols-3 border-t border-white/[0.06] bg-ink-950/40 sm:grid-cols-6">
 
-        <TradeStat
-          label="Entrada"
-          value={
-            formatPrice(
+          <TradeStat
+            label="Entrada"
+            value={
+              formatPrice(
+                asset,
+                result.entry,
+              )
+            }
+            tone="accent"
+          />
+
+          <TradeStat
+            label="Stop"
+            value={
+              formatPrice(
+                asset,
+                result.stop,
+              )
+            }
+            tone="bear"
+          />
+
+          <TradeStat
+            label="Alvo"
+            value={
+              formatPrice(
+                asset,
+                result.target,
+              )
+            }
+            tone="bull"
+          />
+
+          <TradeStat
+            label="Risco"
+            value={`${formatPrice(
               asset,
-              result.entry,
-            )
-          }
-          tone="accent"
-        />
+              riskPoints,
+            )} pts`}
+            tone="bear"
+          />
 
-        <TradeStat
-          label="Stop"
-          value={
-            formatPrice(
+          <TradeStat
+            label="Retorno"
+            value={`${formatPrice(
               asset,
-              result.stop,
-            )
-          }
-          tone="bear"
-        />
+              rewardPoints,
+            )} pts`}
+            tone="bull"
+          />
 
-        <TradeStat
-          label="Alvo"
-          value={
-            formatPrice(
-              asset,
-              result.target,
-            )
-          }
-          tone="bull"
-        />
+          <TradeStat
+            label="R/R"
+            value={
+              riskReward.toFixed(
+                2,
+              )
+            }
+          />
 
-        <TradeStat
-          label="Risco"
-          value={`${formatPrice(
-            asset,
-            riskPoints,
-          )} pts`}
-          tone="bear"
-        />
+        </div>
+      ) : (
+        <div className="border-t border-white/[0.06] bg-ink-950/40 px-4 py-4 text-center">
 
-        <TradeStat
-          label="Retorno"
-          value={`${formatPrice(
-            asset,
-            rewardPoints,
-          )} pts`}
-          tone="bull"
-        />
+          <div
+            className={`text-xs font-extrabold uppercase tracking-wider ${
+              hasInvalidDirectionalPlan
+                ? 'text-red-400'
+                : 'text-wait-400'
+            }`}
+          >
+            {hasInvalidDirectionalPlan
+              ? 'PLANO BLOQUEADO'
+              : 'AGUARDAR'}
+          </div>
 
-        <TradeStat
-          label="R/R"
-          value={
-            riskReward.toFixed(
-              2,
-            )
-          }
-        />
+          <div className="mt-1 text-[10px] text-slate-500">
+            {hasInvalidDirectionalPlan
+              ? 'Entrada, stop e alvo não respeitam a direção do sinal.'
+              : 'Sem operação ativa. Entrada, stop e alvo ficam ocultos até surgir COMPRA ou VENDA válida.'}
+          </div>
 
-      </div>
+        </div>
+      )}
 
 
       <div className="grid grid-cols-2 border-t border-white/[0.06] bg-ink-950/25 sm:grid-cols-6">
