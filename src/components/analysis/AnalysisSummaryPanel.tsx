@@ -43,6 +43,27 @@ export function AnalysisSummaryPanel({
         ? 'text-bear-400'
         : 'text-wait-400';
 
+  const hasValidBuyPlan =
+    result.finalSignal === 'BUY' &&
+    result.stop < result.entry &&
+    result.target > result.entry;
+
+  const hasValidSellPlan =
+    result.finalSignal === 'SELL' &&
+    result.stop > result.entry &&
+    result.target < result.entry;
+
+  const hasActiveTrade =
+    hasValidBuyPlan ||
+    hasValidSellPlan;
+
+  const hasInvalidDirectionalPlan =
+    (
+      result.finalSignal === 'BUY' ||
+      result.finalSignal === 'SELL'
+    ) &&
+    !hasActiveTrade;
+
   return (
     <section className="card animate-fade-up overflow-hidden">
       <div className="border-b border-slate-800 px-4 py-4 sm:px-5">
@@ -145,23 +166,47 @@ export function AnalysisSummaryPanel({
                 value={formatPrice(asset, result.price)}
               />
 
-              <PriceRow
-                label="Entrada"
-                value={formatPrice(asset, result.entry)}
-                tone="entry"
-              />
+              {hasActiveTrade ? (
+                <>
+                  <PriceRow
+                    label="Entrada"
+                    value={formatPrice(asset, result.entry)}
+                    tone="entry"
+                  />
 
-              <PriceRow
-                label="Stop"
-                value={formatPrice(asset, result.stop)}
-                tone="stop"
-              />
+                  <PriceRow
+                    label="Stop"
+                    value={formatPrice(asset, result.stop)}
+                    tone="stop"
+                  />
 
-              <PriceRow
-                label="Alvo"
-                value={formatPrice(asset, result.target)}
-                tone="target"
-              />
+                  <PriceRow
+                    label="Alvo"
+                    value={formatPrice(asset, result.target)}
+                    tone="target"
+                  />
+                </>
+              ) : (
+                <div className="bg-ink-800/40 px-4 py-4 text-center">
+                  <div
+                    className={`text-xs font-extrabold uppercase tracking-wider ${
+                      hasInvalidDirectionalPlan
+                        ? 'text-bear-400'
+                        : 'text-wait-400'
+                    }`}
+                  >
+                    {hasInvalidDirectionalPlan
+                      ? 'PLANO BLOQUEADO'
+                      : 'SEM OPERAÇÃO'}
+                  </div>
+
+                  <div className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                    {hasInvalidDirectionalPlan
+                      ? 'Entrada, stop e alvo não respeitam a direção do sinal.'
+                      : 'Aguardando confirmação para liberar entrada, stop e alvo.'}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
