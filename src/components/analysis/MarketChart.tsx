@@ -21,6 +21,7 @@ import type {
   Asset,
   AnalysisResult,
   Candle,
+  Timeframe,
 } from '@/types';
 
 import {
@@ -56,6 +57,7 @@ import {
 
 interface MarketChartProps {
   asset: Asset;
+  timeframe: Timeframe;
   candles: Candle[];
   result: AnalysisResult;
 }
@@ -199,6 +201,7 @@ function calculateEmaSeries(
 
 export function MarketChart({
   asset,
+  timeframe,
   candles,
   result,
 }: MarketChartProps) {
@@ -1225,7 +1228,7 @@ export function MarketChart({
               </div>
 
               <div className="text-[10px] text-slate-500">
-                WDO real • 5m • EMA 9 • EMA 21
+                {asset} real • {timeframe} • EMA 9 • EMA 21
               </div>
             </div>
 
