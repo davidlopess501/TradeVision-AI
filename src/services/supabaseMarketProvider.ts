@@ -1,10 +1,10 @@
 import type {
-  Asset,
-  Timeframe,
-  Candle,
-  Quote,
-  IndicatorResult,
   AnalysisResult,
+  Asset,
+  Candle,
+  IndicatorResult,
+  Quote,
+  Timeframe,
 } from '@/types';
 
 import type {
@@ -17,11 +17,11 @@ import { ASSETS } from '@/lib/assets';
 import {
   INDICATOR_META,
   buildIndicator,
-  buildRealEmaIndicators,
-  buildRealRsiIndicator,
-  buildRealMacdIndicator,
-  buildRealVolumeIndicator,
   buildRealAtrIndicator,
+  buildRealEmaIndicators,
+  buildRealMacdIndicator,
+  buildRealRsiIndicator,
+  buildRealVolumeIndicator,
 } from '@/lib/indicators';
 
 import {
@@ -31,7 +31,6 @@ import {
 import {
   WDO_REAL_HISTORY_24082026,
 } from '@/data/wdoRealHistory24082026';
-
 
 type SupabaseCandleRow = {
   candle_time: string;
@@ -43,30 +42,74 @@ type SupabaseCandleRow = {
   volume: number | string;
 };
 
+type RealMarketConfig = {
+  asset: Asset;
+  timeframe: Timeframe;
+  table: string;
+  minutes: number;
+  symbolPrefix: string;
+};
 
-/**
- * Aceita somente horários reais de candle 5m:
- * xx:00, xx:05, xx:10, ...
- *
- * Isso remove:
- * - candle teste com segundos quebrados;
- * - registros de 1 segundo;
- * - registros que não pertencem ao timeframe 5m.
- */
-function isFiveMinuteBoundary(
+const REAL_MARKETS: RealMarketConfig[] = [
+  {
+    asset: 'WDO',
+    timeframe: '5m',
+    table: 'wdo_5m',
+    minutes: 5,
+    symbolPrefix: 'WDO',
+  },
+  {
+    asset: 'WIN',
+    timeframe: '15m',
+    table: 'win_15m',
+    minutes: 15,
+    symbolPrefix: 'WIN',
+  },
+];
+
+function getRealMarketConfig(
+  asset: Asset,
+  timeframe: Timeframe,
+): RealMarketConfig {
+  const config = REAL_MARKETS.find(
+    (item) =>
+      item.asset === asset &&
+      item.timeframe === timeframe,
+  );
+
+  if (!config) {
+    throw new Error(
+      `Modo REAL não configurado para ${asset} ${timeframe}. Disponíveis: WDO 5m e WIN 15m.`,
+    );
+  }
+
+  return config;
+}
+
+function getDefaultTimeframe(
+  asset: Asset,
+): Timeframe {
+  if (asset === 'WDO') return '5m';
+  if (asset === 'WIN') return '15m';
+
+  throw new Error(
+    `Modo REAL não configurado para ${asset}. Disponíveis: WDO e WIN.`,
+  );
+}
+
+function isTimeframeBoundary(
   milliseconds: number,
+  minutes: number,
 ): boolean {
-  const date =
-    new Date(milliseconds);
+  const date = new Date(milliseconds);
 
   return (
     Number.isFinite(milliseconds) &&
     date.getUTCSeconds() === 0 &&
     date.getUTCMilliseconds() === 0 &&
-    date.getUTCMinutes() % 5 === 0
+    date.getUTCMinutes() % minutes === 0
   );
 }
-
 
 function isValidOhlc(
   candle: Candle,
@@ -91,17 +134,15 @@ function isValidOhlc(
     return false;
   }
 
-  const bodyHigh =
-    Math.max(
-      candle.open,
-      candle.close,
-    );
+  const bodyHigh = Math.max(
+    candle.open,
+    candle.close,
+  );
 
-  const bodyLow =
-    Math.min(
-      candle.open,
-      candle.close,
-    );
+  const bodyLow = Math.min(
+    candle.open,
+    candle.close,
+  );
 
   return (
     candle.high >= bodyHigh &&
@@ -110,78 +151,78 @@ function isValidOhlc(
   );
 }
 
-
-function isValidFiveMinuteCandle(
+function isValidRealCandle(
   candle: Candle,
+  minutes: number,
 ): boolean {
   return (
-    isFiveMinuteBoundary(
+    isTimeframeBoundary(
       candle.time,
+      minutes,
     ) &&
-    isValidOhlc(
-      candle,
-    )
+    isValidOhlc(candle)
   );
 }
-
 
 function mergeRealCandles(
   historicalCandles: Candle[],
   supabaseCandles: Candle[],
+  minutes: number,
 ): Candle[] {
-  const byTime =
-    new Map<number, Candle>();
+  const byTime = new Map<number, Candle>();
 
-
-  for (
-    const candle of historicalCandles
-  ) {
-    if (
-      isValidFiveMinuteCandle(
-        candle,
-      )
-    ) {
-      byTime.set(
-        candle.time,
-        candle,
-      );
+  for (const candle of historicalCandles) {
+    if (isValidRealCandle(candle, minutes)) {
+      byTime.set(candle.time, candle);
     }
   }
 
-
-  /**
-   * Supabase entra depois.
-   * Portanto, se existir o mesmo horário,
-   * o registro mais recente do Supabase
-   * substitui o histórico local.
-   */
-  for (
-    const candle of supabaseCandles
-  ) {
-    if (
-      isValidFiveMinuteCandle(
-        candle,
-      )
-    ) {
-      byTime.set(
-        candle.time,
-        candle,
-      );
+  for (const candle of supabaseCandles) {
+    if (isValidRealCandle(candle, minutes)) {
+      byTime.set(candle.time, candle);
     }
   }
-
 
   return Array
-    .from(
-      byTime.values(),
-    )
+    .from(byTime.values())
     .sort(
       (first, second) =>
-        first.time -
-        second.time,
+        first.time - second.time,
     );
 }
 
+function mapSupabaseRowsToCandles(
+  rows: SupabaseCandleRow[],
+  symbolPrefix: string,
+  minutes: number,
+): Candle[] {
+  return rows
+    .filter(
+      (row) =>
+        String(row.asset)
+          .toUpperCase()
+          .includes(symbolPrefix),
+    )
+    .map(
+      (row) => ({
+        time: new Date(
+          row.candle_time,
+        ).getTime(),
+        open: Number(row.open),
+        high: Number(row.high),
+        low: Number(row.low),
+        close: Number(row.close),
+        volume: Number(row.volume),
+      }),
+    )
+    .filter(
+      (candle) =>
+        isValidRealCandle(
+          candle,
+          minutes,
+        ),
+    );
+}
 
 export class SupabaseMarketDataProvider
   implements IMarketDataProvider
@@ -189,42 +230,30 @@ export class SupabaseMarketDataProvider
   readonly name =
     'Supabase B3 - Excel RTD';
 
-
   async getCandles(
     asset: Asset,
     timeframe: Timeframe,
     count: number,
   ): Promise<Candle[]> {
-
-    if (asset !== 'WDO') {
-      throw new Error(
-        `Modo REAL ainda não configurado para ${asset}. Selecione WDO.`,
-      );
-    }
-
-
-    if (timeframe !== '5m') {
-      throw new Error(
-        `Modo REAL disponível somente para WDO 5m. Timeframe recebido: ${timeframe}.`,
-      );
-    }
-
-
-    const safeCount =
-      Math.min(
-        2000,
-        Math.max(
-          1,
-          Math.floor(count),
-        ),
+    const config =
+      getRealMarketConfig(
+        asset,
+        timeframe,
       );
 
+    const safeCount = Math.min(
+      2000,
+      Math.max(
+        1,
+        Math.floor(count),
+      ),
+    );
 
     const {
       data,
       error,
     } = await supabase
-      .from('wdo_5m')
+      .from(config.table)
       .select(
         [
           'candle_time',
@@ -244,128 +273,71 @@ export class SupabaseMarketDataProvider
       )
       .limit(safeCount);
 
-
     if (error) {
       throw new Error(
-        `Erro Supabase candles: ${error.message}`,
+        `Erro Supabase candles ${asset} ${timeframe}: ${error.message}`,
       );
     }
 
+    const rows = (
+      data ?? []
+    ) as unknown as SupabaseCandleRow[];
 
-    const rows =
-      (
-        data ?? []
-      ) as unknown as
-        SupabaseCandleRow[];
+    const supabaseCandles =
+      mapSupabaseRowsToCandles(
+        rows,
+        config.symbolPrefix,
+        config.minutes,
+      );
 
-
-    const supabaseCandles:
-      Candle[] =
-        rows
-          .filter(
-            (row) =>
-              String(
-                row.asset,
-              )
-                .toUpperCase()
-                .includes(
-                  'WDO',
-                ),
+    const historicalCandles: Candle[] =
+      asset === 'WDO' &&
+      timeframe === '5m'
+        ? WDO_REAL_HISTORY_24082026.filter(
+            (candle) =>
+              isValidRealCandle(
+                candle,
+                config.minutes,
+              ),
           )
-          .map(
-            (row) => ({
-              time:
-                new Date(
-                  row.candle_time,
-                ).getTime(),
-
-              open:
-                Number(
-                  row.open,
-                ),
-
-              high:
-                Number(
-                  row.high,
-                ),
-
-              low:
-                Number(
-                  row.low,
-                ),
-
-              close:
-                Number(
-                  row.close,
-                ),
-
-              volume:
-                Number(
-                  row.volume,
-                ),
-            }),
-          )
-          .filter(
-            isValidFiveMinuteCandle,
-          );
-
-
-    const historicalCandles =
-      WDO_REAL_HISTORY_24082026
-        .filter(
-          isValidFiveMinuteCandle,
-        );
-
+        : [];
 
     const merged =
       mergeRealCandles(
         historicalCandles,
         supabaseCandles,
+        config.minutes,
       );
 
-
-    if (
-      merged.length === 0
-    ) {
+    if (merged.length === 0) {
       throw new Error(
-        'Nenhum candle REAL WDO 5m válido disponível.',
+        `Nenhum candle REAL ${asset} ${timeframe} válido disponível.`,
       );
     }
 
-
     const result =
-      merged.length >
-      safeCount
-        ? merged.slice(
-            -safeCount,
-          )
+      merged.length > safeCount
+        ? merged.slice(-safeCount)
         : merged;
 
-
     console.info(
-      '[TradeVision REAL] WDO 5m',
+      `[TradeVision REAL] ${asset} ${timeframe}`,
       {
-        historicoExcel:
+        tabela: config.table,
+        historicoLocal:
           historicalCandles.length,
-
         supabaseValidos:
           supabaseCandles.length,
-
         totalSemDuplicatas:
           merged.length,
-
         retornados:
           result.length,
-
         primeiro:
-          result[0]
-            ?.time,
-
+          result[0]?.time,
         ultimo:
           result[
             result.length - 1
           ]?.time,
-
         ultimoClose:
           result[
             result.length - 1
@@ -373,35 +345,32 @@ export class SupabaseMarketDataProvider
       },
     );
 
-
     return result;
   }
-
 
   async getQuote(
     asset: Asset,
   ): Promise<Quote> {
+    const timeframe =
+      getDefaultTimeframe(asset);
 
     const candles =
       await this.getCandles(
         asset,
-        '5m',
+        timeframe,
         2,
       );
-
 
     const latest =
       candles[
         candles.length - 1
       ];
 
-
     if (!latest) {
       throw new Error(
-        'Não foi possível obter o último candle WDO.',
+        `Não foi possível obter o último candle REAL de ${asset}.`,
       );
     }
-
 
     const previous =
       candles.length > 1
@@ -409,7 +378,6 @@ export class SupabaseMarketDataProvider
             candles.length - 2
           ]
         : latest;
-
 
     const changePct =
       previous.close !== 0
@@ -422,45 +390,28 @@ export class SupabaseMarketDataProvider
           ) * 100
         : 0;
 
-
     return {
       asset,
-
-      price:
-        latest.close,
-
+      price: latest.close,
       changePct,
-
-      high:
-        latest.high,
-
-      low:
-        latest.low,
-
-      open:
-        latest.open,
-
+      high: latest.high,
+      low: latest.low,
+      open: latest.open,
       spread: 0,
-
-      updatedAt:
-        latest.time,
+      updatedAt: latest.time,
     };
   }
-
 
   subscribeQuotes(
     asset: Asset,
     callback:
       (quote: Quote) => void,
   ): () => void {
-
     let active = true;
     let running = false;
 
-
     const update =
       async () => {
-
         if (
           !active ||
           running
@@ -468,21 +419,14 @@ export class SupabaseMarketDataProvider
           return;
         }
 
-
         running = true;
-
 
         try {
           const quote =
-            await this.getQuote(
-              asset,
-            );
-
+            await this.getQuote(asset);
 
           if (active) {
-            callback(
-              quote,
-            );
+            callback(quote);
           }
         } catch (error) {
           console.error(
@@ -494,38 +438,31 @@ export class SupabaseMarketDataProvider
         }
       };
 
-
     void update();
-
 
     const interval =
       window.setInterval(
-        () =>
-          void update(),
+        () => void update(),
         5000,
       );
 
-
     return () => {
       active = false;
-
-      window.clearInterval(
-        interval,
-      );
+      window.clearInterval(interval);
     };
   }
-
 
   async getIndicators(
     asset: Asset,
     timeframe: Timeframe,
   ): Promise<IndicatorResult[]> {
+    getRealMarketConfig(
+      asset,
+      timeframe,
+    );
 
     const quote =
-      await this.getQuote(
-        asset,
-      );
-
+      await this.getQuote(asset);
 
     const candles =
       await this.getCandles(
@@ -534,21 +471,14 @@ export class SupabaseMarketDataProvider
         120,
       );
 
-
-    if (
-      candles.length < 35
-    ) {
+    if (candles.length < 35) {
       throw new Error(
-        `Histórico REAL insuficiente. Existem ${candles.length} candles; são necessários pelo menos 35.`,
+        `Histórico REAL insuficiente para ${asset} ${timeframe}. Existem ${candles.length} candles; são necessários pelo menos 35.`,
       );
     }
 
-
     const decimals =
-      ASSETS[
-        asset
-      ].decimals;
-
+      ASSETS[asset].decimals;
 
     const realIndicators:
       IndicatorResult[] = [
@@ -556,30 +486,24 @@ export class SupabaseMarketDataProvider
           candles,
           decimals,
         ),
-
         buildRealRsiIndicator(
           candles,
         ),
-
         buildRealMacdIndicator(
           candles,
           decimals,
         ),
-
         buildRealVolumeIndicator(
           candles,
         ),
-
         buildRealAtrIndicator(
           candles,
           decimals,
         ),
       ];
 
-
     return INDICATOR_META.map(
       (meta) => {
-
         const realIndicator =
           realIndicators.find(
             (indicator) =>
@@ -587,13 +511,9 @@ export class SupabaseMarketDataProvider
               meta.key,
           );
 
-
-        if (
-          realIndicator
-        ) {
+        if (realIndicator) {
           return realIndicator;
         }
-
 
         return buildIndicator(
           meta.key,
@@ -606,21 +526,14 @@ export class SupabaseMarketDataProvider
     );
   }
 
-
   async analyze(
     asset: Asset,
     timeframe: Timeframe,
   ): Promise<AnalysisResult> {
-
-    if (
-      asset !== 'WDO' ||
-      timeframe !== '5m'
-    ) {
-      throw new Error(
-        'Análise REAL disponível nesta etapa somente para WDO 5m.',
-      );
-    }
-
+    getRealMarketConfig(
+      asset,
+      timeframe,
+    );
 
     const candles =
       await this.getCandles(
@@ -629,15 +542,11 @@ export class SupabaseMarketDataProvider
         120,
       );
 
-
-    if (
-      candles.length < 35
-    ) {
+    if (candles.length < 35) {
       throw new Error(
-        `Histórico REAL insuficiente: ${candles.length}/35 candles.`,
+        `Histórico REAL insuficiente para ${asset} ${timeframe}: ${candles.length}/35 candles.`,
       );
     }
-
 
     const analysis =
       buildHistoricalAnalysis(
@@ -646,24 +555,19 @@ export class SupabaseMarketDataProvider
         candles,
       );
 
-
     console.info(
-      '[TradeVision REAL] Análise WDO 5m concluída',
+      `[TradeVision REAL] Análise ${asset} ${timeframe} concluída`,
       {
         candles:
           candles.length,
-
         score:
           analysis.score,
-
         trend:
           analysis.trend,
-
         signal:
           analysis.finalSignal,
       },
     );
-
 
     return analysis;
   }
