@@ -7,7 +7,7 @@ AnalysisResult,
 Candle,
 } from '@/types';
 
-import { getMarketDataProvider } from '@/services/types';
+import { getMarketDataProvider, getMarketDataMode } from '@/services/types';
 
 import {
 evaluateAnalysis,
@@ -16,6 +16,10 @@ evaluateAnalysis,
 import {
 buildHistoricalAnalysis,
 } from '@/services/historicalAnalysisBuilder';
+
+import {
+upsertRealSignalJournal,
+} from '@/services/realSignalJournal';
 
 import {
 prepareOrder,
@@ -4231,6 +4235,57 @@ setInstitutionalAnalysis(
 }, [result, candles, multiTimeframe]);
 
 useEffect(() => {
+if (
+getMarketDataMode() !== 'REAL' ||
+!result ||
+!decision ||
+candles.length === 0
+) {
+return;
+}
+
+const supportedRealMarket =
+  (asset === 'WDO' && timeframe === '5m') ||
+  (asset === 'WIN' && timeframe === '15m');
+
+if (!supportedRealMarket) {
+return;
+}
+
+const latestCandle =
+  candles[candles.length - 1];
+
+if (!latestCandle) {
+return;
+}
+
+void upsertRealSignalJournal({
+  asset,
+  timeframe,
+  candleTime: latestCandle.time,
+  signal: result.finalSignal,
+  score: result.score,
+  confidence: decision.confidence,
+  trend: result.trend,
+  entry: result.entry,
+  stop: result.stop,
+  target: result.target,
+}).catch((caughtError) => {
+  console.error(
+    '[TradeVision] Falha ao registrar sinal REAL:',
+    caughtError,
+  );
+});
+
+}, [
+asset,
+timeframe,
+result,
+decision,
+candles,
+]);
+
+useEffect(() => {
 processWdo5PaperTrading(candles);
 
 // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4238,9 +4293,13 @@ processWdo5PaperTrading(candles);
 }, [asset, timeframe, candles]);
 
 useEffect(() => {
+const supportedRealMarket =
+  (asset === 'WDO' && timeframe === '5m') ||
+  (asset === 'WIN' && timeframe === '15m');
+
 if (
-asset !== 'WDO' ||
-timeframe !== '5m'
+!supportedRealMarket ||
+getMarketDataMode() !== 'REAL'
 ) {
 return;
 }
