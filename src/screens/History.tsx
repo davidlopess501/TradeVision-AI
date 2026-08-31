@@ -1,110 +1,711 @@
-import { useState } from 'react';
-import { useStore } from '@/store';
-import { formatDateTime, formatPrice } from '@/lib/assets';
-import { Trash2, Inbox, Filter } from 'lucide-react';
-import type { Asset, AnalysisResult } from '@/types';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
-type Filter = 'all' | 'WIN' | 'WDO' | 'BUY' | 'SELL' | 'WAIT';
+import {
+  Activity,
+  CheckCircle2,
+  Clock3,
+  RefreshCw,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  XCircle,
+} from 'lucide-react';
 
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'Todos' },
-  { value: 'WIN', label: 'WIN' },
-  { value: 'WDO', label: 'WDO' },
-  { value: 'BUY', label: 'Compra' },
-  { value: 'SELL', label: 'Venda' },
-  { value: 'WAIT', label: 'Aguardar' },
-];
+import {
+  getRealSignalHistory,
+  resolvePendingRealSignals,
+  summarizeRealSignals,
+  type RealSignalJournalRow,
+} from '@/services/realSignalJournal';
+
+type AssetFilter =
+  | 'ALL'
+  | 'WDO'
+  | 'WIN';
+
+type ResultFilter =
+  | 'ALL'
+  | 'OPEN'
+  | 'WIN'
+  | 'LOSS';
+
+function money(
+  value: number,
+): string {
+  return new Intl.NumberFormat(
+    'pt-BR',
+    {
+      style: 'currency',
+      currency: 'BRL',
+      maximumFractionDigits: 2,
+    },
+  ).format(value);
+}
+
+function number(
+  value: number,
+  digits = 1,
+): string {
+  return new Intl.NumberFormat(
+    'pt-BR',
+    {
+      minimumFractionDigits:
+        digits,
+      maximumFractionDigits:
+        digits,
+    },
+  ).format(value);
+}
+
+function formatTime(
+  value: string,
+): string {
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return value;
+  }
+
+  return date.toLocaleString(
+    'pt-BR',
+    {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    },
+  );
+}
+
+function resultClass(
+  result:
+    RealSignalJournalRow['result'],
+): string {
+  if (result === 'WIN') {
+    return 'text-emerald-400';
+  }
+
+  if (result === 'LOSS') {
+    return 'text-red-400';
+  }
+
+  if (result === 'OPEN') {
+    return 'text-amber-400';
+  }
+
+  return 'text-slate-500';
+}
+
+function signalClass(
+  signal: string,
+): string {
+  if (signal === 'BUY') {
+    return 'text-emerald-400';
+  }
+
+  if (signal === 'SELL') {
+    return 'text-red-400';
+  }
+
+  return 'text-slate-400';
+}
 
 export default function History() {
-  const { history, clearHistory } = useStore();
-  const [filter, setFilter] = useState<Filter>('all');
+  const [
+    rows,
+    setRows,
+  ] = useState<
+    RealSignalJournalRow[]
+  >([]);
 
-  const filtered = history.filter((h) => {
-    if (filter === 'all') return true;
-    if (filter === 'WIN' || filter === 'WDO') return h.asset === (filter as Asset);
-    return h.finalSignal === filter;
-  });
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    resolving,
+    setResolving,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState<
+    string | null
+  >(null);
+
+  const [
+    assetFilter,
+    setAssetFilter,
+  ] = useState<AssetFilter>(
+    'ALL',
+  );
+
+  const [
+    resultFilter,
+    setResultFilter,
+  ] = useState<ResultFilter>(
+    'ALL',
+  );
+
+  const load =
+    useCallback(
+      async () => {
+        setLoading(true);
+        setError(null);
+
+        try {
+          const history =
+            await getRealSignalHistory(
+              500,
+            );
+
+          setRows(history);
+        } catch (
+          caughtError
+        ) {
+          setError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : 'Falha ao carregar histórico REAL.',
+          );
+        } finally {
+          setLoading(false);
+        }
+      },
+      [],
+    );
+
+  const resolve =
+    useCallback(
+      async () => {
+        setResolving(true);
+        setError(null);
+
+        try {
+          await resolvePendingRealSignals();
+          await load();
+        } catch (
+          caughtError
+        ) {
+          setError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : 'Falha ao resolver sinais.',
+          );
+        } finally {
+          setResolving(false);
+        }
+      },
+      [load],
+    );
+
+  useEffect(() => {
+    void resolve();
+
+    const interval =
+      window.setInterval(
+        () => {
+          void resolve();
+        },
+        60_000,
+      );
+
+    return () => {
+      window.clearInterval(
+        interval,
+      );
+    };
+  }, [resolve]);
+
+  const filteredRows =
+    useMemo(
+      () =>
+        rows.filter(
+          (row) => {
+            if (
+              assetFilter !==
+                'ALL' &&
+              row.asset !==
+                assetFilter
+            ) {
+              return false;
+            }
+
+            if (
+              resultFilter !==
+                'ALL' &&
+              row.result !==
+                resultFilter
+            ) {
+              return false;
+            }
+
+            return true;
+          },
+        ),
+      [
+        rows,
+        assetFilter,
+        resultFilter,
+      ],
+    );
+
+  const metrics =
+    useMemo(
+      () =>
+        summarizeRealSignals(
+          filteredRows,
+        ),
+      [filteredRows],
+    );
 
   return (
     <div className="space-y-5">
-      <section className="animate-fade-up flex items-end justify-between">
-        <div>
-          <h2 className="text-lg font-extrabold tracking-tight text-white">Histórico</h2>
-          <p className="text-xs text-slate-500">Sinais gerados pela análise</p>
-        </div>
-        {history.length > 0 && (
-          <button onClick={clearHistory} className="flex items-center gap-1.5 rounded-lg bg-bear-500/10 px-3 py-1.5 text-xs font-bold text-bear-400 transition-colors hover:bg-bear-500/20">
-            <Trash2 className="h-3.5 w-3.5" /> Limpar
-          </button>
-        )}
-      </section>
+      <section className="animate-fade-up">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-extrabold tracking-tight text-white">
+              Histórico REAL
+            </h2>
 
-      {/* Filters */}
-      <section className="animate-fade-up flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-        <Filter className="h-3.5 w-3.5 shrink-0 text-slate-600" />
-        {FILTERS.map((f) => (
+            <p className="mt-1 text-xs text-slate-500">
+              Journal de sinais, resultados e P&amp;L do WDO 5m e WIN 15m
+            </p>
+          </div>
+
           <button
-            key={f.value}
-            onClick={() => setFilter(f.value)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold transition-all ${filter === f.value ? 'bg-accent-500 text-white' : 'bg-ink-850 text-slate-400 hover:bg-ink-800'}`}
+            type="button"
+            onClick={() => void resolve()}
+            disabled={
+              loading ||
+              resolving
+            }
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-slate-300 transition hover:border-sky-500/50 hover:text-sky-300 disabled:opacity-50"
           >
-            {f.label}
+            <RefreshCw
+              className={`h-4 w-4 ${
+                resolving
+                  ? 'animate-spin'
+                  : ''
+              }`}
+            />
+            Atualizar
           </button>
-        ))}
+        </div>
       </section>
 
-      {/* List */}
-      <section className="animate-fade-up pb-2">
-        {filtered.length === 0 ? (
-          <div className="card flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <div className="grid h-12 w-12 place-items-center rounded-full bg-ink-800">
-              <Inbox className="h-5 w-5 text-slate-600" />
-            </div>
-            <p className="text-sm font-medium text-slate-400">Nenhum sinal encontrado</p>
-            <p className="text-xs text-slate-600">Realize análises na tela Análise para preencher o histórico</p>
+      {error && (
+        <section className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+          {error}
+        </section>
+      )}
+
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <MetricCard
+          title="SINAIS"
+          value={String(
+            metrics.actionable,
+          )}
+          subtitle={`${metrics.total} análises`}
+          icon={Activity}
+        />
+
+        <MetricCard
+          title="TAXA DE ACERTO"
+          value={`${number(
+            metrics.winRate,
+            1,
+          )}%`}
+          subtitle={`${metrics.wins} WIN • ${metrics.losses} LOSS`}
+          icon={Target}
+        />
+
+        <MetricCard
+          title="P&L REAL/PAPER"
+          value={money(
+            metrics.netPnlMoney,
+          )}
+          subtitle={`${metrics.open} abertas`}
+          icon={
+            metrics.netPnlMoney >=
+            0
+              ? TrendingUp
+              : TrendingDown
+          }
+        />
+
+        <MetricCard
+          title="QUALIDADE MÉDIA"
+          value={`${number(
+            metrics.avgScore,
+            0,
+          )}/100`}
+          subtitle={`${number(
+            metrics.avgConfidence,
+            0,
+          )}% confiança`}
+          icon={CheckCircle2}
+        />
+      </section>
+
+      <section className="card space-y-4 p-4">
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              'ALL',
+              'WDO',
+              'WIN',
+            ] as AssetFilter[]
+          ).map(
+            (filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() =>
+                  setAssetFilter(
+                    filter,
+                  )
+                }
+                className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
+                  assetFilter ===
+                  filter
+                    ? 'border-sky-500 bg-sky-500/10 text-sky-300'
+                    : 'border-slate-800 bg-slate-950 text-slate-500'
+                }`}
+              >
+                {filter ===
+                'ALL'
+                  ? 'Todos ativos'
+                  : filter}
+              </button>
+            ),
+          )}
+
+          <div className="hidden h-8 w-px bg-slate-800 sm:block" />
+
+          {(
+            [
+              'ALL',
+              'OPEN',
+              'WIN',
+              'LOSS',
+            ] as ResultFilter[]
+          ).map(
+            (filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() =>
+                  setResultFilter(
+                    filter,
+                  )
+                }
+                className={`rounded-lg border px-3 py-2 text-xs font-bold transition ${
+                  resultFilter ===
+                  filter
+                    ? 'border-sky-500 bg-sky-500/10 text-sky-300'
+                    : 'border-slate-800 bg-slate-950 text-slate-500'
+                }`}
+              >
+                {filter ===
+                'ALL'
+                  ? 'Todos resultados'
+                  : filter}
+              </button>
+            ),
+          )}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-center sm:grid-cols-6">
+          <MiniStat
+            label="BUY"
+            value={metrics.buys}
+          />
+          <MiniStat
+            label="SELL"
+            value={metrics.sells}
+          />
+          <MiniStat
+            label="WAIT"
+            value={metrics.waits}
+          />
+          <MiniStat
+            label="ABERTAS"
+            value={metrics.open}
+          />
+          <MiniStat
+            label="WIN"
+            value={metrics.wins}
+          />
+          <MiniStat
+            label="LOSS"
+            value={metrics.losses}
+          />
+        </div>
+      </section>
+
+      <section className="card overflow-hidden">
+        <div className="border-b border-slate-800 px-4 py-3">
+          <h3 className="text-sm font-extrabold text-white">
+            Sinais registrados
+          </h3>
+
+          <p className="mt-1 text-xs text-slate-500">
+            O resultado só é fechado quando um candle posterior toca alvo ou stop.
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
+            <RefreshCw className="h-4 w-4 animate-spin" />
+            Carregando journal...
+          </div>
+        ) : filteredRows.length ===
+          0 ? (
+          <div className="py-16 text-center">
+            <Clock3 className="mx-auto mb-3 h-6 w-6 text-slate-700" />
+
+            <p className="text-sm font-bold text-slate-400">
+              Nenhum sinal registrado ainda
+            </p>
+
+            <p className="mt-1 text-xs text-slate-600">
+              Amanhã o modo REAL começa a alimentar este painel automaticamente.
+            </p>
           </div>
         ) : (
-          <ul className="space-y-2">
-            {filtered.map((h) => (
-              <HistoryRow key={h.id} item={h} />
-            ))}
-          </ul>
+          <div className="overflow-x-auto">
+            <table className="min-w-[980px] w-full text-left text-xs">
+              <thead className="bg-slate-950/60 text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-bold">
+                    Data
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Ativo
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Sinal
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Score
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Conf.
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Entrada
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Stop
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Alvo
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    Resultado
+                  </th>
+                  <th className="px-4 py-3 text-right font-bold">
+                    P&amp;L
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredRows.map(
+                  (row) => (
+                    <tr
+                      key={row.id}
+                      className="border-t border-slate-800/70 text-slate-300"
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-500">
+                        {formatTime(
+                          row.candle_time,
+                        )}
+                      </td>
+
+                      <td className="px-3 py-3 font-black text-white">
+                        {row.asset}{' '}
+                        <span className="font-medium text-slate-600">
+                          {row.timeframe}
+                        </span>
+                      </td>
+
+                      <td
+                        className={`px-3 py-3 font-black ${signalClass(
+                          row.signal,
+                        )}`}
+                      >
+                        {row.signal}
+                      </td>
+
+                      <td className="px-3 py-3">
+                        {number(
+                          row.score,
+                          0,
+                        )}
+                      </td>
+
+                      <td className="px-3 py-3">
+                        {number(
+                          row.confidence,
+                          0,
+                        )}
+                        %
+                      </td>
+
+                      <td className="px-3 py-3">
+                        {row.entry > 0
+                          ? number(
+                              row.entry,
+                              row.asset ===
+                                'WDO'
+                                ? 1
+                                : 0,
+                            )
+                          : '—'}
+                      </td>
+
+                      <td className="px-3 py-3">
+                        {row.stop > 0
+                          ? number(
+                              row.stop,
+                              row.asset ===
+                                'WDO'
+                                ? 1
+                                : 0,
+                            )
+                          : '—'}
+                      </td>
+
+                      <td className="px-3 py-3">
+                        {row.target > 0
+                          ? number(
+                              row.target,
+                              row.asset ===
+                                'WDO'
+                                ? 1
+                                : 0,
+                            )
+                          : '—'}
+                      </td>
+
+                      <td
+                        className={`px-3 py-3 font-black ${resultClass(
+                          row.result,
+                        )}`}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {row.result ===
+                            'WIN' && (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          )}
+
+                          {row.result ===
+                            'LOSS' && (
+                            <XCircle className="h-3.5 w-3.5" />
+                          )}
+
+                          {row.result ===
+                            'OPEN' && (
+                            <Clock3 className="h-3.5 w-3.5" />
+                          )}
+
+                          {row.result}
+                        </span>
+                      </td>
+
+                      <td
+                        className={`px-4 py-3 text-right font-black ${
+                          (row.pnl_money ??
+                            0) >=
+                          0
+                            ? 'text-emerald-400'
+                            : 'text-red-400'
+                        }`}
+                      >
+                        {row.pnl_money ===
+                        null
+                          ? '—'
+                          : money(
+                              row.pnl_money,
+                            )}
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>
   );
 }
 
-function HistoryRow({ item }: { item: AnalysisResult }) {
-  const cfg =
-    item.finalSignal === 'BUY'
-      ? { text: 'text-bull-400', bg: 'bg-bull-500/10', label: 'COMPRA' }
-      : item.finalSignal === 'SELL'
-        ? { text: 'text-bear-400', bg: 'bg-bear-500/10', label: 'VENDA' }
-        : { text: 'text-wait-400', bg: 'bg-wait-500/10', label: 'AGUARDAR' };
-
+function MetricCard({
+  title,
+  value,
+  subtitle,
+  icon: Icon,
+}: {
+  title: string;
+  value: string;
+  subtitle: string;
+  icon: typeof Activity;
+}) {
   return (
-    <li className="card p-3.5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-lg bg-ink-800 text-[11px] font-bold text-accent-300">{item.asset}</span>
-          <div>
-            <div className={`text-sm font-bold ${cfg.text}`}>{cfg.label}</div>
-            <div className="text-[11px] text-slate-600 tabular">{formatDateTime(item.createdAt)} · {item.timeframe}</div>
-          </div>
+    <div className="card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black tracking-widest text-slate-600">
+            {title}
+          </p>
+
+          <p className="mt-2 text-xl font-black text-white">
+            {value}
+          </p>
+
+          <p className="mt-1 text-[11px] text-slate-500">
+            {subtitle}
+          </p>
         </div>
-        <div className="text-right">
-          <div className="font-mono text-lg font-bold tabular text-white">{item.score}</div>
-          <div className="text-[9px] uppercase tracking-wider text-slate-600">score</div>
+
+        <div className="rounded-xl bg-sky-500/10 p-2 text-sky-400">
+          <Icon className="h-4 w-4" />
         </div>
       </div>
-      <div className="mt-2.5 flex items-center justify-between rounded-lg bg-ink-800/40 px-3 py-2">
-        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${cfg.bg} ${cfg.text}`}>{item.trend}</span>
-        <div className="flex items-center gap-3 text-[11px] tabular">
-          <span className="text-slate-500">Conf. <span className="font-bold text-slate-300">{item.confidence}%</span></span>
-          <span className="text-slate-500">Entrada <span className="font-bold text-slate-300">{formatPrice(item.asset, item.entry)}</span></span>
-        </div>
-      </div>
-    </li>
+    </div>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  return (
+    <div>
+      <p className="text-[10px] font-bold text-slate-600">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-black text-slate-300">
+        {value}
+      </p>
+    </div>
   );
 }
